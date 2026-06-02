@@ -1,0 +1,158 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - role: string (required, 'admin' or 'user')
+    //   - companyName: string (optional)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: campaigns
+    // Document ID: {campaignId}
+    // Fields:
+    //   - id: string (required)
+    //   - userId: string (required)
+    //   - companyName: string (required)
+    //   - area: string (required)
+    //   - bottles: number (required, > 0)
+    //   - sides: number (required, 1-4)
+    //   - designUrl: string (required)
+    //   - totalPrice: number (required)
+    //   - status: string (required, 'pending', 'approved', 'rejected')
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: areas
+    // Document ID: {areaId}
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - basePrice: number (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "jmisagor079@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'role', 'companyName', 'createdAt']) &&
+        data.uid is string && data.uid.size() > 0 &&
+        data.email is string && isValidEmail(data.email) &&
+        data.role in ['admin', 'user'] &&
+        isValidDateString(data.createdAt);
+    }
+
+    function isValidCampaign(data) {
+      return hasOnlyAllowedFields(['id', 'userId', 'companyName', 'area', 'bottles', 'sides', 'designUrl', 'totalPrice', 'status', 'createdAt']) &&
+        data.id is string &&
+        data.userId is string &&
+        data.companyName is string && data.companyName.size() > 0 &&
+        data.area is string &&
+        data.bottles is int && data.bottles > 0 &&
+        data.sides is int && data.sides >= 1 && data.sides <= 4 &&
+        data.designUrl is string &&
+        data.totalPrice is number && data.totalPrice >= 0 &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        isValidDateString(data.createdAt);
+    }
+
+    function isValidArea(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'basePrice']) &&
+        data.id is string &&
+        data.name is string && data.name.size() > 0 &&
+        data.basePrice is number && data.basePrice >= 0;
+    }
+
+    function isValidSupportRequest(data) {
+      return hasOnlyAllowedFields(['id', 'userId', 'userEmail', 'message', 'adminReply', 'repliedAt', 'status', 'createdAt']) &&
+        data.userEmail is string && isValidEmail(data.userEmail) &&
+        data.message is string && data.message.size() > 0 &&
+        data.status in ['pending', 'resolved'] &&
+        isValidDateString(data.createdAt) &&
+        (data.get('userId', null) == null || data.userId is string) &&
+        (data.get('adminReply', null) == null || data.adminReply is string) &&
+        (data.get('repliedAt', null) == null || isValidDateString(data.repliedAt));
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+    }
+
+    match /campaigns/{campaignId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && 
+                      request.resource.data.userId == request.auth.uid && 
+                      request.resource.data.status == 'pending' && 
+                      isValidCampaign(request.resource.data);
+      allow update: if isAdmin() || 
+                      (isOwner(resource.data.userId) && 
+                       resource.data.status == 'pending' && 
+                       request.resource.data.status == 'pending' && 
+                       isValidCampaign(request.resource.data));
+      allow delete: if isAdmin() || (isOwner(resource.data.userId) && resource.data.status == 'pending');
+    }
+
+    match /areas/{areaId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidArea(request.resource.data);
+    }
+
+    match /support_requests/{requestId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() &&
+                      isValidSupportRequest(request.resource.data) &&
+                      (request.resource.data.get('userId', null) == null || request.resource.data.userId == request.auth.uid) &&
+                      request.resource.data.status == 'pending';
+      allow update: if isAdmin() ||
+                      (isAuthenticated() && 
+                       resource.data.userId == request.auth.uid && 
+                       request.resource.data.status == resource.data.status && 
+                       isValidSupportRequest(request.resource.data));
+      allow delete: if isAdmin();
+    }
+  }
+}

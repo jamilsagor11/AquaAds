@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information including role and company details.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "companyName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "description": "An advertising campaign for a water bottle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "campaignName": { "type": "string" },
+        "companyName": { "type": "string" },
+        "area": { "type": "string" },
+        "targetAudience": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "bottles": { "type": "integer" },
+        "sides": { "type": "integer" },
+        "designUrl": { "type": "string" },
+        "totalPrice": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "campaignName", "area", "bottles", "sides", "totalPrice", "status"]
+    },
+    "Area": {
+      "title": "Area",
+      "description": "Target area for advertising.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "basePrice": { "type": "number" }
+      },
+      "required": ["name", "basePrice"]
+    },
+    "SupportRequest": {
+      "title": "SupportRequest",
+      "description": "A message or request sent to the management team.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string", "format": "email" },
+        "message": { "type": "string" },
+        "adminReply": { "type": "string" },
+        "repliedAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userEmail", "message", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles."
+    },
+    "/campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "Advertising campaigns."
+    },
+    "/areas/{areaId}": {
+      "schema": "Area",
+      "description": "Available target areas."
+    },
+    "/support_requests/{requestId}": {
+      "schema": "SupportRequest",
+      "description": "Messages for the management team."
+    }
+  }
+}
