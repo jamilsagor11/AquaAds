@@ -236,6 +236,18 @@ export const AdminPanel: React.FC = () => {
 
   if (loading) return <div className="flex items-center justify-center h-64 text-slate-500">Loading admin data...</div>;
 
+  const selectedCampaignUser = selectedCampaign ? users.find(u => u.uid === selectedCampaign.userId) : null;
+  const selectedCampaignUserMessages = selectedCampaign 
+    ? supportRequests.filter(s => s.userId === selectedCampaign.userId || s.userEmail.toLowerCase() === selectedCampaignUser?.email.toLowerCase())
+    : [];
+
+  const selectedSupportRequestUser = selectedSupportRequest
+    ? users.find(u => u.uid === selectedSupportRequest.userId || u.email.toLowerCase() === selectedSupportRequest.userEmail.toLowerCase())
+    : null;
+  const selectedSupportRequestUserCampaigns = selectedSupportRequest
+    ? campaigns.filter(c => c.userId === selectedSupportRequest.userId || (selectedSupportRequestUser && c.userId === selectedSupportRequestUser.uid))
+    : [];
+
   return (
     <div className="space-y-8">
       <div>
@@ -704,6 +716,45 @@ export const AdminPanel: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Linked Customer Messages */}
+                {selectedCampaignUserMessages.length > 0 && (
+                  <div className="bg-slate-50 p-6 rounded-3xl mb-8">
+                    <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-purple-600" />
+                      Client Messages ({selectedCampaignUserMessages.length})
+                    </h3>
+                    <div className="space-y-3 max-h-40 overflow-y-auto pr-1">
+                      {selectedCampaignUserMessages.map((msg) => (
+                        <div key={msg.id} className="flex justify-between items-start bg-white p-4 rounded-2xl border border-slate-200 text-xs">
+                          <div className="flex-1 min-w-0 mr-4">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider",
+                                msg.status === 'resolved' ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                              )}>
+                                {msg.status}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                {new Date(msg.createdAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <p className="text-slate-600 italic line-clamp-2">"{msg.message}"</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedSupportRequest(msg);
+                              setSelectedCampaign(null);
+                            }}
+                            className="text-blue-600 hover:text-blue-700 font-bold hover:underline self-center whitespace-nowrap"
+                          >
+                            Open & Reply
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {selectedCampaign.status === 'pending' && (
                   <div className="flex gap-4">
                     <button
@@ -741,7 +792,7 @@ export const AdminPanel: React.FC = () => {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden"
+              className="relative bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden"
             >
               <div className="p-8">
                 <div className="flex justify-between items-start mb-6">
@@ -763,11 +814,56 @@ export const AdminPanel: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="bg-slate-50 p-6 rounded-2xl mb-8">
+                <div className="bg-slate-50 p-6 rounded-2xl mb-6">
                   <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">
                     {selectedSupportRequest.message}
                   </p>
                 </div>
+
+                {/* Linked Client's Orders / Campaigns */}
+                {selectedSupportRequestUserCampaigns.length > 0 && (
+                  <div className="bg-slate-50 p-6 rounded-3xl mb-6">
+                    <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                      <Package className="w-4 h-4 text-blue-600" />
+                      Client Campaigns / Orders ({selectedSupportRequestUserCampaigns.length})
+                    </h3>
+                    <div className="space-y-3 max-h-40 overflow-y-auto pr-1">
+                      {selectedSupportRequestUserCampaigns.map((camp) => (
+                        <div key={camp.id} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 text-xs">
+                          <div className="flex-1 min-w-0 mr-4">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-full text-[9px] font-bold mr-2 uppercase tracking-wide",
+                              camp.status === 'approved' ? "bg-green-100 text-green-700" :
+                              camp.status === 'rejected' ? "bg-red-100 text-red-700" :
+                              "bg-amber-100 text-amber-700"
+                            )}>
+                              {camp.status}
+                            </span>
+                            <span className="font-bold text-slate-800">
+                              {camp.campaignName || 'Untitled Campaign'}
+                            </span>
+                            <span className="text-slate-400 mx-2">|</span>
+                            <span className="text-slate-500">{camp.bottles.toLocaleString()} bottles</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-blue-600 font-bold">
+                              {formatCurrency(camp.totalPrice)}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setSelectedCampaign(camp);
+                                setSelectedSupportRequest(null);
+                              }}
+                              className="text-blue-600 hover:text-blue-700 font-bold hover:underline"
+                            >
+                              View Details
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {selectedSupportRequest.adminReply && (
                   <div className="bg-blue-50 p-6 rounded-2xl mb-8 border border-blue-100">

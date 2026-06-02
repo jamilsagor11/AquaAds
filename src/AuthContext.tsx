@@ -21,7 +21,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (firebaseUser) {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
-          setUser(userDoc.data() as UserProfile);
+          const userData = userDoc.data() as UserProfile;
+          if (firebaseUser.email === 'jmisagor079@gmail.com' && userData.role !== 'admin') {
+            const updatedProfile: UserProfile = { ...userData, role: 'admin' };
+            await setDoc(doc(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
+            setUser(updatedProfile);
+          } else {
+            setUser(userData);
+          }
         } else {
           // Create new user profile
           const newUser: UserProfile = {
