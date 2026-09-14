@@ -9,9 +9,12 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { CampaignForm } from './components/CampaignForm';
 import { AdminPanel } from './components/AdminPanel';
+import { UserMessaging } from './components/UserMessaging';
+import { AdminMessaging } from './components/AdminMessaging';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Droplets, ArrowRight, ShieldCheck, BarChart3, Globe } from 'lucide-react';
 import { motion } from 'motion/react';
+
 
 const LandingPage: React.FC = () => {
   const { login } = useAuth();
@@ -144,7 +147,7 @@ const LandingPage: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
 
   if (loading) {
@@ -168,9 +171,10 @@ const AppContent: React.FC = () => {
   return (
     <ErrorBoundary>
       <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
-        {activeTab === 'dashboard' && <Dashboard />}
+        {activeTab === 'dashboard' && <Dashboard onNavigate={setActiveTab} />}
         {activeTab === 'campaign' && <CampaignForm />}
-        {activeTab === 'admin' && <AdminPanel />}
+        {activeTab === 'messages' && (isAdmin ? <AdminMessaging /> : <UserMessaging />)}
+        {activeTab === 'admin' && <AdminPanel onNavigate={setActiveTab} />}
       </Layout>
     </ErrorBoundary>
   );

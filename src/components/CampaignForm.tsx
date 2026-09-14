@@ -4,6 +4,7 @@ import { db, collection, addDoc, handleFirestoreError } from '../firebase';
 import { OperationType } from '../types';
 import { BottleVisualizer } from './BottleVisualizer';
 import { formatCurrency } from '../lib/utils';
+import { syncCampaignToSupabase } from '../lib/supabase';
 import { 
   Calculator, 
   MapPin, 
@@ -19,7 +20,11 @@ import {
   CreditCard,
   Upload,
   Info,
-  ShieldCheck
+  ShieldCheck,
+  Droplets,
+  Sparkles,
+  Copy,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -27,6 +32,36 @@ import { cn } from '../lib/utils';
 const AREAS = ['Dhaka North', 'Dhaka South', 'Chittagong', 'Sylhet', 'Rajshahi'];
 const AUDIENCES = ['General', 'Students', 'Professionals', 'Families', 'Health Enthusiasts'];
 const PRICE_PER_SIDE = 2.5;
+
+const SIDE_INFO: Record<number, { title: string; label: string; hint: string }> = {
+  1: {
+    title: 'Side 1 (Front Face)',
+    label: 'Primary Brand Logo & Display',
+    hint: 'Main storefront display face seen directly by consumers.',
+  },
+  2: {
+    title: 'Side 2 (Right Face)',
+    label: 'QR Code & Special Offer',
+    hint: 'Ideal for scan-to-win, digital coupon, or direct web traffic.',
+  },
+  3: {
+    title: 'Side 3 (Back Face)',
+    label: 'Brand Story & Social Handles',
+    hint: 'Great for company mission, social handles, or origin story.',
+  },
+  4: {
+    title: 'Side 4 (Left Face)',
+    label: '360° Continuous Wrap',
+    hint: 'Full bottle coverage with complete 4-sided visibility.',
+  },
+};
+
+const SAMPLE_DESIGNS: Record<number, string> = {
+  1: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=600&auto=format&fit=crop&q=80',
+  2: 'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=600&auto=format&fit=crop&q=80',
+  3: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop&q=80',
+  4: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600&auto=format&fit=crop&q=80',
+};
 
 export const CampaignForm: React.FC = () => {
   const { user } = useAuth();
@@ -43,9 +78,11 @@ export const CampaignForm: React.FC = () => {
   const [bottles, setBottles] = useState(100);
   const [sides, setSides] = useState(1);
   
-  // Step 3: Creative
-  const [designUrl, setDesignUrl] = useState('');
-  const [isMockUploading, setIsMockUploading] = useState(false);
+  // Step 3: Creative (supports 1, 2, 3, or 4 pictures based on selected sides)
+  const [designUrls, setDesignUrls] = useState<string[]>(['', '', '', '']);
+  const [activeSideTab, setActiveSideTab] = useState<number>(1);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   
   // Step 4: Review & Payment
   const [showPayment, setShowPayment] = useState(false);
@@ -57,12 +94,68 @@ export const CampaignForm: React.FC = () => {
   const handleNext = () => setStep(s => Math.min(s + 1, 4));
   const handleBack = () => setStep(s => Math.max(s - 1, 1));
 
-  const handleMockUpload = () => {
-    setIsMockUploading(true);
-    setTimeout(() => {
-      setDesignUrl('https://picsum.photos/seed/ad-design/400/600');
-      setIsMockUploading(false);
-    }, 1500);
+  const updateSideUrl = (sideIndex: number, url: string) => {
+    setDesignUrls(prev => {
+      const next = [...prev];
+      next[sideIndex - 1] = url;
+      return next;
+    });
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, sideIndex: number) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        updateSideUrl(sideIndex, reader.result);
+      }
+      setIsUploading(false);
+    };
+    reader.onerror = () => {
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleDropFile = (e: React.DragEvent<HTMLDivElement>, sideIndex: number) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        updateSideUrl(sideIndex, reader.result);
+      }
+      setIsUploading(false);
+    };
+    reader.onerror = () => {
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleApplySample = (sideIndex: number) => {
+    updateSideUrl(sideIndex, SAMPLE_DESIGNS[sideIndex] || SAMPLE_DESIGNS[1]);
+  };
+
+  const handleCopyImageToAllSides = (fromSideIndex: number) => {
+    const sourceImg = designUrls[fromSideIndex - 1];
+    if (!sourceImg) return;
+    setDesignUrls(prev => {
+      const next = [...prev];
+      for (let i = 0; i < sides; i++) {
+        next[i] = sourceImg;
+      }
+      return next;
+    });
+  };
+
+  const handleRemoveSideImage = (sideIndex: number) => {
+    updateSideUrl(sideIndex, '');
   };
 
   const confirmPayment = async (method: string) => {
@@ -70,7 +163,10 @@ export const CampaignForm: React.FC = () => {
     setIsSubmitting(true);
     try {
       const path = 'campaigns';
-      await addDoc(collection(db, path), {
+      const activeDesignList = designUrls.slice(0, sides);
+      const primaryDesign = activeDesignList[0] || activeDesignList.find(u => !!u) || '';
+
+      const campaignPayload = {
         userId: user.uid,
         campaignName,
         companyName: user.companyName || user.email.split('@')[0],
@@ -80,11 +176,16 @@ export const CampaignForm: React.FC = () => {
         endDate,
         bottles,
         sides,
-        designUrl,
+        designUrl: primaryDesign,
+        designUrls: activeDesignList,
         totalPrice,
-        status: 'pending',
+        status: 'pending' as const,
         createdAt: new Date().toISOString(),
-      });
+      };
+      
+      const docRef = await addDoc(collection(db, path), campaignPayload);
+      syncCampaignToSupabase({ id: docRef.id, ...campaignPayload });
+
       setSuccess(true);
       setTimeout(() => {
         setSuccess(false);
@@ -94,7 +195,8 @@ export const CampaignForm: React.FC = () => {
         setCampaignName('');
         setBottles(100);
         setSides(1);
-        setDesignUrl('');
+        setDesignUrls(['', '', '', '']);
+        setActiveSideTab(1);
         setStartDate('');
         setEndDate('');
       }, 3000);
@@ -253,7 +355,12 @@ export const CampaignForm: React.FC = () => {
                       <button
                         key={s}
                         type="button"
-                        onClick={() => setSides(s)}
+                        onClick={() => {
+                          setSides(s);
+                          if (activeSideTab > s) {
+                            setActiveSideTab(1);
+                          }
+                        }}
                         className={cn(
                           "py-3 rounded-xl border-2 font-bold transition-all",
                           sides === s ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-100" : "bg-white border-slate-100 text-slate-500 hover:border-slate-200"
@@ -268,8 +375,7 @@ export const CampaignForm: React.FC = () => {
                 <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex gap-3">
                   <Info className="w-5 h-5 text-blue-600 shrink-0" />
                   <p className="text-xs text-blue-700 leading-relaxed">
-                    Selecting more sides increases your brand's visibility from different angles. 
-                    4 sides gives you exclusive branding on the entire bottle.
+                    Selecting {sides} side{sides > 1 ? 's' : ''} allows you to upload {sides} {sides === 1 ? 'picture' : 'pictures'} in Step 3 to customize each face of your square bottle.
                   </p>
                 </div>
               </motion.div>
@@ -283,57 +389,239 @@ export const CampaignForm: React.FC = () => {
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-6"
               >
-                <div className="space-y-4">
-                  <div 
-                    onClick={handleMockUpload}
+                {/* Hidden File Input for Image Selection */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => handleFileUpload(e, activeSideTab)}
+                />
+
+                {/* Header & Side Count Banner */}
+                <div className="bg-gradient-to-r from-blue-50 via-sky-50 to-indigo-50 p-5 rounded-3xl border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-base font-black text-slate-900 flex items-center gap-2">
+                      <ImageIcon className="w-5 h-5 text-blue-600" />
+                      Bottle Artwork ({sides} {sides === 1 ? 'Side' : 'Sides'} Selected)
+                    </h4>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      {sides === 1
+                        ? 'Upload 1 picture for your primary front display label.'
+                        : `Upload ${sides} pictures — one distinct design for each of the ${sides} selected sides.`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/90 backdrop-blur-xs rounded-full border border-blue-200 text-xs font-bold text-blue-700 self-start sm:self-auto shadow-xs">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>
+                      {designUrls.slice(0, sides).filter(Boolean).length} of {sides} uploaded
+                    </span>
+                  </div>
+                </div>
+
+                {/* Side Switcher Tabs */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500 px-1">
+                    <span>Select side to configure:</span>
+                    <span className="text-blue-600">3D bottle rotates to selected side</span>
+                  </div>
+                  <div className={cn("grid gap-2", sides === 1 ? "grid-cols-1" : sides === 2 ? "grid-cols-2" : sides === 3 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4")}>
+                    {Array.from({ length: sides }).map((_, i) => {
+                      const sideNum = i + 1;
+                      const isUploaded = !!designUrls[i];
+                      const isActive = activeSideTab === sideNum;
+                      return (
+                        <button
+                          key={sideNum}
+                          type="button"
+                          onClick={() => setActiveSideTab(sideNum)}
+                          className={cn(
+                            "p-3 rounded-2xl border-2 text-left transition-all flex flex-col justify-between relative",
+                            isActive
+                              ? "border-blue-600 bg-blue-50/50 shadow-md shadow-blue-100/50"
+                              : "border-slate-100 hover:border-slate-200 bg-white"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-1 w-full mb-1">
+                            <span className={cn(
+                              "text-xs font-black",
+                              isActive ? "text-blue-700" : "text-slate-800"
+                            )}>
+                              Side {sideNum}
+                            </span>
+                            {isUploaded ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Done
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-medium text-slate-400">Empty</span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 line-clamp-1 font-medium">
+                            {SIDE_INFO[sideNum]?.label || `Side ${sideNum}`}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Active Side Upload Card */}
+                <div className="p-6 bg-white rounded-3xl border-2 border-slate-100 shadow-sm space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-black mb-1">
+                        <Droplets className="w-3.5 h-3.5 text-blue-600" />
+                        {SIDE_INFO[activeSideTab]?.title}
+                      </div>
+                      <h5 className="text-base font-bold text-slate-900">
+                        {SIDE_INFO[activeSideTab]?.label}
+                      </h5>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {SIDE_INFO[activeSideTab]?.hint}
+                      </p>
+                    </div>
+
+                    {/* Action Shortcuts */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleApplySample(activeSideTab)}
+                        className="px-3 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                        title="Load sample advertisement design"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-sky-600" />
+                        <span>Sample Design</span>
+                      </button>
+                      {sides > 1 && designUrls[activeSideTab - 1] && (
+                        <button
+                          type="button"
+                          onClick={() => handleCopyImageToAllSides(activeSideTab)}
+                          className="px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                          title="Apply this picture to all sides"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-slate-600" />
+                          <span>Copy to all</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Main Drag & Drop / Click Target */}
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => handleDropFile(e, activeSideTab)}
+                    onClick={() => fileInputRef.current?.click()}
                     className={cn(
-                      "group relative h-48 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center gap-3 cursor-pointer transition-all",
-                      designUrl ? "border-green-200 bg-green-50" : "border-slate-200 hover:border-blue-400 hover:bg-blue-50"
+                      "group relative min-h-48 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center p-6 cursor-pointer transition-all",
+                      designUrls[activeSideTab - 1]
+                        ? "border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50/70"
+                        : "border-slate-200 hover:border-blue-400 hover:bg-blue-50/40"
                     )}
                   >
-                    {isMockUploading ? (
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-                    ) : designUrl ? (
-                      <>
-                        <CheckCircle2 className="w-10 h-10 text-green-600" />
-                        <span className="text-sm font-bold text-green-700">Design Uploaded!</span>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setDesignUrl(''); }}
-                          className="absolute top-4 right-4 text-xs font-bold text-slate-400 hover:text-red-500"
-                        >Remove</button>
-                      </>
+                    {isUploading ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+                        <p className="text-xs font-bold text-slate-600">Processing image...</p>
+                      </div>
+                    ) : designUrls[activeSideTab - 1] ? (
+                      <div className="w-full flex flex-col items-center gap-3">
+                        <div className="relative group/img max-h-40 rounded-xl overflow-hidden border border-emerald-200 shadow-sm bg-white p-1">
+                          <img
+                            src={designUrls[activeSideTab - 1]}
+                            alt={`Side ${activeSideTab}`}
+                            className="max-h-36 object-contain rounded-lg"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="text-center">
+                          <div className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            Picture Uploaded for Side {activeSideTab}
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">Click to choose a different file or drag new picture</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveSideImage(activeSideTab);
+                          }}
+                          className="px-3 py-1 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-xs"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Remove Picture
+                        </button>
+                      </div>
                     ) : (
-                      <>
+                      <div className="flex flex-col items-center text-center gap-3">
                         <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
                           <Upload className="w-6 h-6" />
                         </div>
-                        <div className="text-center">
-                          <p className="text-sm font-bold text-slate-900">Upload Your Design</p>
-                          <p className="text-xs text-slate-500">PNG, JPG or SVG (Max 5MB)</p>
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">
+                            Upload Picture for Side {activeSideTab}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Drag & drop or click to browse (PNG, JPG, SVG up to 5MB)
+                          </p>
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
 
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-slate-100"></div>
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase tracking-widest font-bold text-slate-400">
-                      <span className="bg-white px-4">Or use URL</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
+                  {/* Alternative URL Input */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-600">
+                      Or paste direct image URL for Side {activeSideTab}:
+                    </label>
                     <input
                       type="url"
-                      placeholder="https://example.com/your-design.png"
-                      value={designUrl}
-                      onChange={(e) => setDesignUrl(e.target.value)}
-                      className="w-full px-4 py-3.5 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder={`https://example.com/side-${activeSideTab}-design.png`}
+                      value={designUrls[activeSideTab - 1] || ''}
+                      onChange={(e) => updateSideUrl(activeSideTab, e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-xs"
                     />
                   </div>
                 </div>
+
+                {/* Multi-Side Gallery Bar (when 2, 3, or 4 sides are selected) */}
+                {sides > 1 && (
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-2">
+                    <p className="text-xs font-bold text-slate-700">All {sides} Selected Bottle Faces:</p>
+                    <div className={cn("grid gap-2", sides === 2 ? "grid-cols-2" : sides === 3 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4")}>
+                      {Array.from({ length: sides }).map((_, i) => {
+                        const sideNum = i + 1;
+                        const img = designUrls[i];
+                        const isTab = activeSideTab === sideNum;
+                        return (
+                          <div
+                            key={sideNum}
+                            onClick={() => setActiveSideTab(sideNum)}
+                            className={cn(
+                              "p-2 rounded-xl border cursor-pointer transition-all flex flex-col items-center text-center",
+                              isTab ? "bg-blue-50 border-blue-500 ring-1 ring-blue-400" : "bg-white border-slate-200 hover:border-slate-300"
+                            )}
+                          >
+                            <div className="w-full h-14 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden mb-1 border border-slate-100">
+                              {img ? (
+                                <img src={img} alt={`Side ${sideNum}`} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="text-[9px] text-slate-400 font-medium">No Image</span>
+                              )}
+                            </div>
+                            <p className="text-[10px] font-bold text-slate-800">Side {sideNum}</p>
+                            <span className={cn(
+                              "text-[9px] font-semibold",
+                              img ? "text-emerald-600" : "text-amber-600"
+                            )}>
+                              {img ? "Ready" : "Needed"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -363,7 +651,33 @@ export const CampaignForm: React.FC = () => {
                     <span className="text-slate-500">Quantity</span>
                     <span className="text-right font-bold text-slate-900">{bottles.toLocaleString()} Bottles</span>
                     <span className="text-slate-500">Branding</span>
-                    <span className="text-right font-bold text-slate-900">{sides} Side{sides > 1 ? 's' : ''}</span>
+                    <span className="text-right font-bold text-slate-900">{sides} Side{sides > 1 ? 's' : ''} per Bottle</span>
+                  </div>
+
+                  {/* Artwork Breakdown for Review */}
+                  <div className="pt-3 border-t border-slate-200/80">
+                    <p className="text-xs font-bold text-slate-700 mb-2">
+                      Bottle Artwork ({designUrls.slice(0, sides).filter(Boolean).length} of {sides} Pictures Attached):
+                    </p>
+                    <div className={cn("grid gap-2", sides === 1 ? "grid-cols-1" : sides === 2 ? "grid-cols-2" : sides === 3 ? "grid-cols-3" : "grid-cols-2 sm:grid-cols-4")}>
+                      {Array.from({ length: sides }).map((_, i) => {
+                        const sideNum = i + 1;
+                        const img = designUrls[i];
+                        return (
+                          <div key={sideNum} className="p-2 bg-white rounded-xl border border-slate-200 flex flex-col items-center text-center">
+                            <div className="w-full h-16 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden mb-1 border border-slate-100">
+                              {img ? (
+                                <img src={img} alt={`Side ${sideNum}`} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="text-[10px] text-slate-400">Spring Water Standard</span>
+                              )}
+                            </div>
+                            <p className="text-[10px] font-bold text-slate-800">Side {sideNum}</p>
+                            <p className="text-[9px] text-slate-500 truncate max-w-full">{SIDE_INFO[sideNum]?.label}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
@@ -406,22 +720,31 @@ export const CampaignForm: React.FC = () => {
 
         {/* Preview Section */}
         <div className="sticky top-8 space-y-8">
-          <div className="bg-white p-12 rounded-[3rem] shadow-2xl shadow-slate-100 border border-slate-100 flex flex-col items-center">
-            <div className="text-center mb-10">
-              <h3 className="text-2xl font-black text-slate-900 mb-2">Live Preview</h3>
-              <p className="text-slate-500 text-sm">See your brand come to life on our square bottles</p>
+          <div className="bg-white p-8 sm:p-10 rounded-[3rem] shadow-2xl shadow-slate-100 border border-slate-100 flex flex-col items-center">
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold mb-2">
+                <Droplets className="w-3.5 h-3.5 text-blue-600" />
+                Square Water Bottle 3D
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 mb-1">Live Preview</h3>
+              <p className="text-slate-500 text-xs">Interactive 3D rotating square water bottle preview</p>
             </div>
             
-            <BottleVisualizer selectedSides={sides} designUrl={designUrl} />
+            <BottleVisualizer
+              selectedSides={sides}
+              designUrls={designUrls.slice(0, sides)}
+              designUrl={designUrls[0] || ''}
+              focusedSide={step === 3 ? activeSideTab : null}
+            />
 
-            <div className="mt-12 grid grid-cols-2 gap-4 w-full">
-              <div className="bg-slate-50 p-5 rounded-3xl border border-slate-100 text-center">
-                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Impact</p>
-                <p className="text-lg font-bold text-slate-900">High Visibility</p>
+            <div className="mt-8 grid grid-cols-2 gap-4 w-full">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Format</p>
+                <p className="text-base font-bold text-slate-900">500ml Square Bottle</p>
               </div>
-              <div className="bg-green-50 p-5 rounded-3xl border border-green-100 text-center">
+              <div className="bg-green-50 p-4 rounded-2xl border border-green-100 text-center">
                 <p className="text-[10px] text-green-600 font-black uppercase tracking-widest mb-1">Est. Reach</p>
-                <p className="text-lg font-bold text-slate-900">~{(bottles * 5).toLocaleString()}</p>
+                <p className="text-base font-bold text-slate-900">~{(bottles * 5).toLocaleString()}</p>
               </div>
             </div>
           </div>

@@ -1,33 +1,112 @@
 import React, { useEffect, useState } from 'react';
-import { db, collection, query, orderBy, onSnapshot, updateDoc, doc } from '../firebase';
-import { Campaign, UserProfile, SupportRequest } from '../types';
+import { db, collection, query, orderBy, onSnapshot, updateDoc, doc, deleteDoc } from '../firebase';
+import { Campaign, UserProfile } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
-import { CheckCircle2, XCircle, Clock, Users, BarChart3, Package, Eye, Calendar, Target, ExternalLink, ArrowRight, MessageSquare, Trash2, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Users, BarChart3, Package, Eye, Calendar, Target, ExternalLink, ArrowRight, MessageSquare, Trash2, ShieldCheck, Database, RefreshCw, Copy, Check, Server, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../firebase';
+import { BottleVisualizer } from './BottleVisualizer';
+import { supabase, checkSupabaseHealth, syncCampaignToSupabase, syncProfileToSupabase, SUPABASE_URL, SupabaseHealthStatus } from '../lib/supabase';
+import { useAuth, isAdminEmail } from '../AuthContext';
 
-export const AdminPanel: React.FC = () => {
+interface AdminPanelProps {
+  onNavigate?: (tab: string) => void;
+}
+
+export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
+  const { user, isAdmin } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeAdminTab, setActiveAdminTab] = useState<'campaigns' | 'users' | 'support'>('campaigns');
+  const [activeAdminTab, setActiveAdminTab] = useState<'campaigns' | 'users' | 'supabase'>('campaigns');
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
-  const [selectedSupportRequest, setSelectedSupportRequest] = useState<SupportRequest | null>(null);
-  const [replyText, setReplyText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Supabase management state
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseHealthStatus | null>(null);
+  const [testingSupabase, setTestingSupabase] = useState(false);
+  const [syncingSupabase, setSyncingSupabase] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<string | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
   
   // Password protection state
   const [password, setPassword] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
 
+  // Auto-authorize logged-in admins (jmisagor079@gmail.com and tonmoyletar@gmail.com)
+  useEffect(() => {
+    if (isAdmin || isAdminEmail(user?.email)) {
+      setIsAuthorized(true);
+    }
+  }, [isAdmin, user]);
+
+  const runSupabaseTest = async () => {
+    setTestingSupabase(true);
+    try {
+      const status = await checkSupabaseHealth();
+      setSupabaseStatus(status);
+    } catch (err: any) {
+      setSupabaseStatus({
+        connected: false,
+        url: SUPABASE_URL,
+        tables: { profiles: false, campaigns: false, messages: false },
+        error: err?.message || 'Check failed',
+        checkedAt: new Date().toISOString(),
+      });
+    } finally {
+      setTestingSupabase(false);
+    }
+  };
+
+  const syncAllDataToSupabase = async () => {
+    setSyncingSupabase(true);
+    setSyncSummary(null);
+    let campaignsSynced = 0;
+    let profilesSynced = 0;
+
+    try {
+      // Sync profiles
+      for (const u of users) {
+        await syncProfileToSupabase(u);
+        profilesSynced++;
+      }
+
+      // Sync campaigns
+      for (const c of campaigns) {
+        await syncCampaignToSupabase({
+          id: c.id,
+          userId: c.userId,
+          campaignName: c.campaignName || 'Campaign',
+          companyName: c.companyName || 'Company',
+          bottles: c.bottles || 100,
+          sides: c.sides || 1,
+          area: c.area || 'General',
+          targetAudience: c.targetAudience || 'General',
+          startDate: c.startDate || new Date().toISOString().split('T')[0],
+          endDate: c.endDate || new Date().toISOString().split('T')[0],
+          designUrl: c.designUrl || '',
+          totalPrice: c.totalPrice || 0,
+          status: c.status || 'pending',
+          createdAt: c.createdAt,
+        });
+        campaignsSynced++;
+      }
+
+      setSyncSummary(`Successfully pushed ${profilesSynced} client profiles and ${campaignsSynced} campaigns to Supabase.`);
+      await runSupabaseTest();
+    } catch (err: any) {
+      setSyncSummary(`Sync encountered an issue: ${err?.message || 'Check console for details'}`);
+    } finally {
+      setSyncingSupabase(false);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthorized) return;
 
     const qCampaigns = query(collection(db, 'campaigns'), orderBy('createdAt', 'desc'));
     const qUsers = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-    const qSupport = query(collection(db, 'support_requests'), orderBy('createdAt', 'desc'));
 
     const unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
@@ -44,19 +123,11 @@ export const AdminPanel: React.FC = () => {
       handleFirestoreError(error, OperationType.GET, 'users');
     });
 
-    const unsubSupport = onSnapshot(qSupport, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SupportRequest));
-      setSupportRequests(data);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'support_requests');
-    });
-
     return () => {
       unsubCampaigns();
       unsubUsers();
-      unsubSupport();
     };
-  }, []);
+  }, [isAuthorized]);
 
   const updateStatus = async (id: string, status: 'approved' | 'rejected') => {
     try {
@@ -69,49 +140,15 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  const resolveSupportRequest = async (id: string) => {
-    try {
-      await updateDoc(doc(db, 'support_requests', id), { status: 'resolved' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `support_requests/${id}`);
-    }
-  };
-
-  const sendReply = async (id: string) => {
-    if (!replyText.trim()) return;
-    try {
-      await updateDoc(doc(db, 'support_requests', id), { 
-        adminReply: replyText,
-        repliedAt: new Date().toISOString(),
-        status: 'resolved'
-      });
-      setReplyText('');
-      setSelectedSupportRequest(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `support_requests/${id}`);
-    }
-  };
-
   const deleteCampaign = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) return;
     try {
-      // Note: In a real app, you'd use a deleteDoc tool or similar. 
-      // For now, we'll assume the user has the delete_file tool if they want to delete files, 
-      // but for Firestore we use deleteDoc.
-      const { deleteDoc } = await import('firebase/firestore');
       await deleteDoc(doc(db, 'campaigns', id));
+      if (selectedCampaign?.id === id) {
+        setSelectedCampaign(null);
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `campaigns/${id}`);
-    }
-  };
-
-  const deleteSupportRequest = async (id: string) => {
-    if (!window.confirm('Delete this support request?')) return;
-    try {
-      const { deleteDoc } = await import('firebase/firestore');
-      await deleteDoc(doc(db, 'support_requests', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `support_requests/${id}`);
     }
   };
 
@@ -215,7 +252,7 @@ export const AdminPanel: React.FC = () => {
     totalBottles: campaigns.reduce((acc, c) => acc + c.bottles, 0),
     activeCampaigns: campaigns.filter(c => c.status === 'approved').length,
     pending: campaigns.filter(c => c.status === 'pending').length,
-    pendingSupport: supportRequests.filter(r => r.status === 'pending').length,
+    totalClients: users.length,
   };
 
   const filteredCampaigns = campaigns.filter(c => 
@@ -229,34 +266,31 @@ export const AdminPanel: React.FC = () => {
     u.uid.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredSupport = supportRequests.filter(s => 
-    s.userEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.message.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  if (loading) return <div className="flex items-center justify-center h-64 text-slate-500">Loading admin data...</div>;
-
-  const selectedCampaignUser = selectedCampaign ? users.find(u => u.uid === selectedCampaign.userId) : null;
-  const selectedCampaignUserMessages = selectedCampaign 
-    ? supportRequests.filter(s => s.userId === selectedCampaign.userId || s.userEmail.toLowerCase() === selectedCampaignUser?.email.toLowerCase())
-    : [];
-
-  const selectedSupportRequestUser = selectedSupportRequest
-    ? users.find(u => u.uid === selectedSupportRequest.userId || u.email.toLowerCase() === selectedSupportRequest.userEmail.toLowerCase())
-    : null;
-  const selectedSupportRequestUserCampaigns = selectedSupportRequest
-    ? campaigns.filter(c => c.userId === selectedSupportRequest.userId || (selectedSupportRequestUser && c.userId === selectedSupportRequestUser.uid))
-    : [];
+  if (loading) return <div className="flex items-center justify-center h-64 text-slate-500 font-medium">Loading admin data...</div>;
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Admin Control Center</h1>
-        <p className="text-slate-500">Manage all advertising campaigns and platform activity.</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Admin Control Center</h1>
+          <p className="text-slate-500">Manage all advertising campaigns, registered clients, and client communications.</p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('messages')}
+              className="px-4 py-2.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors border border-blue-200"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Live Messages Hub</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Admin Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
           <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 mb-4">
             <BarChart3 className="w-6 h-6" />
@@ -275,7 +309,7 @@ export const AdminPanel: React.FC = () => {
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
           <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center text-green-600 mb-4">
-            <Users className="w-6 h-6" />
+            <CheckCircle2 className="w-6 h-6" />
           </div>
           <p className="text-sm font-medium text-slate-500 mb-1">Active Campaigns</p>
           <p className="text-2xl font-bold text-slate-900">{stats.activeCampaigns}</p>
@@ -283,10 +317,10 @@ export const AdminPanel: React.FC = () => {
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
           <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center text-amber-600 mb-4">
-            <MessageSquare className="w-6 h-6" />
+            <Clock className="w-6 h-6" />
           </div>
-          <p className="text-sm font-medium text-slate-500 mb-1">Support Requests</p>
-          <p className="text-2xl font-bold text-slate-900">{stats.pendingSupport}</p>
+          <p className="text-sm font-medium text-slate-500 mb-1">Pending Approval</p>
+          <p className="text-2xl font-bold text-slate-900">{stats.pending}</p>
         </div>
       </div>
 
@@ -300,7 +334,7 @@ export const AdminPanel: React.FC = () => {
               activeAdminTab === 'campaigns' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"
             )}
           >
-            Campaigns & Orders
+            Campaigns & Orders ({campaigns.length})
           </button>
           <button
             onClick={() => { setActiveAdminTab('users'); setSearchTerm(''); }}
@@ -309,16 +343,17 @@ export const AdminPanel: React.FC = () => {
               activeAdminTab === 'users' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"
             )}
           >
-            Registered Clients
+            Registered Clients ({users.length})
           </button>
           <button
-            onClick={() => { setActiveAdminTab('support'); setSearchTerm(''); }}
+            onClick={() => { setActiveAdminTab('supabase'); setSearchTerm(''); runSupabaseTest(); }}
             className={cn(
-              "pb-4 px-2 text-sm font-bold transition-all border-b-2",
-              activeAdminTab === 'support' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-700"
+              "pb-4 px-2 text-sm font-bold transition-all border-b-2 flex items-center gap-1.5",
+              activeAdminTab === 'supabase' ? "border-emerald-600 text-emerald-600" : "border-transparent text-slate-500 hover:text-slate-700"
             )}
           >
-            Support Requests
+            <Database className="w-4 h-4" />
+            <span>Supabase Database</span>
           </button>
         </div>
 
@@ -462,6 +497,7 @@ export const AdminPanel: React.FC = () => {
                   <th className="px-6 py-4">Role</th>
                   <th className="px-6 py-4">Joined Date</th>
                   <th className="px-6 py-4">Total Campaigns</th>
+                  <th className="px-6 py-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -505,15 +541,16 @@ export const AdminPanel: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
+                        {onNavigate && (
                           <button
-                            onClick={() => window.alert(`Direct messaging to ${client.email} is coming soon.`)}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            onClick={() => onNavigate('messages')}
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
                             title="Message Client"
                           >
-                            <MessageSquare className="w-5 h-5" />
+                            <MessageSquare className="w-4 h-4" />
+                            <span>Chat</span>
                           </button>
-                        </div>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -524,87 +561,223 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      {activeAdminTab === 'support' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-6 border-b border-slate-100">
-            <h2 className="text-xl font-bold text-slate-900">Support & Custom Requests</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                  <th className="px-6 py-4">Client Email</th>
-                  <th className="px-6 py-4">Message</th>
-                  <th className="px-6 py-4">Date</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredSupport.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                      No support requests found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredSupport.map((request) => (
-                    <tr key={request.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4">
-                        <p className="text-sm font-bold text-slate-900">{request.userEmail}</p>
-                        <p className="text-[10px] text-slate-500">UID: {request.userId || 'Guest'}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="text-sm text-slate-600 line-clamp-2 max-w-md">{request.message}</p>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-500">
-                        {new Date(request.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={cn(
-                          "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                          request.status === 'resolved' ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                        )}>
-                          {request.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setSelectedSupportRequest(request)}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="View Message"
-                          >
-                            <Eye className="w-5 h-5" />
-                          </button>
-                          {request.status === 'pending' && (
-                            <button
-                              onClick={() => resolveSupportRequest(request.id)}
-                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                              title="Mark as Resolved"
-                            >
-                              <CheckCircle2 className="w-5 h-5" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deleteSupportRequest(request.id)}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete Request"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+      {/* Supabase Database Tab */}
+      {activeAdminTab === 'supabase' && (
+        <div className="space-y-6">
+          {/* Status & Sync Overview */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Connection Card */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">Supabase Endpoint</h3>
+                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{SUPABASE_URL}</p>
+                  </div>
+                </div>
+                <span className={cn(
+                  "px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1",
+                  supabaseStatus?.connected ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                )}>
+                  <span className={cn("w-2 h-2 rounded-full", supabaseStatus?.connected ? "bg-emerald-500" : "bg-amber-500 animate-pulse")} />
+                  {supabaseStatus?.connected ? "Connected" : "Configured"}
+                </span>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-slate-100">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500">Profiles Table:</span>
+                  <span className={cn("font-bold", supabaseStatus?.tables.profiles ? "text-emerald-600" : "text-slate-400")}>
+                    {supabaseStatus?.tables.profiles ? "Active ✓" : "Pending Schema"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500">Campaigns Table:</span>
+                  <span className={cn("font-bold", supabaseStatus?.tables.campaigns ? "text-emerald-600" : "text-slate-400")}>
+                    {supabaseStatus?.tables.campaigns ? "Active ✓" : "Pending Schema"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-500">Messages Table:</span>
+                  <span className={cn("font-bold", supabaseStatus?.tables.messages ? "text-emerald-600" : "text-slate-400")}>
+                    {supabaseStatus?.tables.messages ? "Active ✓" : "Pending Schema"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={runSupabaseTest}
+                  disabled={testingSupabase}
+                  className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className={cn("w-3.5 h-3.5", testingSupabase && "animate-spin")} />
+                  {testingSupabase ? "Testing Connection..." : "Run Health Check"}
+                </button>
+              </div>
+            </div>
+
+            {/* Sync Card */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 lg:col-span-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                    <Server className="w-5 h-5 text-blue-600" />
+                    <span>Dual Database Synchronization</span>
+                  </h3>
+                  <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-semibold">
+                    Real-time Mirroring
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  New campaign orders, client profiles, and live messages automatically mirror to both your primary storage and your Supabase PostgreSQL cluster. You can also manually push all existing records below.
+                </p>
+
+                {syncSummary && (
+                  <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span>{syncSummary}</span>
+                  </div>
                 )}
-              </tbody>
-            </table>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-slate-100">
+                <button
+                  onClick={syncAllDataToSupabase}
+                  disabled={syncingSupabase}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-200 flex items-center gap-2"
+                >
+                  <RefreshCw className={cn("w-4 h-4", syncingSupabase && "animate-spin")} />
+                  {syncingSupabase ? "Synchronizing to Supabase..." : `Push All Data (${campaigns.length} Campaigns & ${users.length} Clients)`}
+                </button>
+                <p className="text-[11px] text-slate-400">
+                  Idempotent upserts safe to run anytime.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Supabase SQL Instructions & Schema Card */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Database className="w-5 h-5 text-emerald-600" />
+                  <span>Supabase SQL Initialization & Migration Schema</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Run this in your Supabase Dashboard SQL Editor (<span className="font-mono text-slate-700">https://supabase.com/dashboard/project/rjdsqktrwehxvtxhbhum/sql</span>) to create tables, RLS policies, and triggers.
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  const sqlScript = `-- AquaAds Supabase SQL Schema
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    company_name TEXT DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+CREATE TABLE IF NOT EXISTS public.campaigns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    company_name TEXT NOT NULL,
+    campaign_name TEXT NOT NULL,
+    bottles INTEGER NOT NULL CHECK (bottles > 0),
+    sides INTEGER NOT NULL CHECK (sides BETWEEN 1 AND 4),
+    area TEXT NOT NULL,
+    target_audience TEXT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    design_url TEXT NOT NULL,
+    total_price NUMERIC(12, 2) NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+CREATE TABLE IF NOT EXISTS public.messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    sender_email TEXT NOT NULL,
+    sender_role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all read profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Allow all write profiles" ON public.profiles FOR ALL USING (true);
+
+CREATE POLICY "Allow all read campaigns" ON public.campaigns FOR SELECT USING (true);
+CREATE POLICY "Allow all write campaigns" ON public.campaigns FOR ALL USING (true);
+
+CREATE POLICY "Allow all read messages" ON public.messages FOR SELECT USING (true);
+CREATE POLICY "Allow all write messages" ON public.messages FOR ALL USING (true);
+`;
+                  navigator.clipboard.writeText(sqlScript);
+                  setCopiedSql(true);
+                  setTimeout(() => setCopiedSql(false), 2500);
+                }}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+              >
+                {copiedSql ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                <span>{copiedSql ? "Copied to Clipboard!" : "Copy Full SQL Script"}</span>
+              </button>
+            </div>
+
+            <div className="p-6 bg-slate-900 font-mono text-xs text-slate-300 overflow-x-auto max-h-96 leading-relaxed">
+              <pre className="text-emerald-400 font-semibold mb-2">-- Step 1: Open Supabase SQL Editor</pre>
+              <pre className="text-slate-400 mb-4">-- https://supabase.com/dashboard/project/rjdsqktrwehxvtxhbhum/sql</pre>
+              <pre className="text-blue-300">{`CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  company_name TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.campaigns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  company_name TEXT NOT NULL,
+  campaign_name TEXT NOT NULL,
+  bottles INTEGER NOT NULL,
+  sides INTEGER NOT NULL,
+  area TEXT NOT NULL,
+  target_audience TEXT NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  design_url TEXT NOT NULL,
+  total_price NUMERIC(12, 2) NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL,
+  sender_id UUID NOT NULL,
+  sender_email TEXT NOT NULL,
+  sender_role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT now()
+);`}</pre>
+            </div>
           </div>
         </div>
       )}
-
-      {/* Campaign Details Modal */}
       <AnimatePresence>
         {selectedCampaign && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -619,23 +792,23 @@ export const AdminPanel: React.FC = () => {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden"
+              className="relative bg-white rounded-[2rem] shadow-2xl border border-slate-100 w-full max-w-2xl max-h-[90vh] overflow-y-auto"
             >
-              <div className="p-8">
-                <div className="flex justify-between items-start mb-8">
+              <div className="p-5 sm:p-8">
+                <div className="flex justify-between items-start mb-6">
                   <div>
                     <span className={cn(
-                      "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mb-3",
+                      "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mb-2",
                       selectedCampaign.status === 'approved' ? "bg-green-100 text-green-700" :
                       selectedCampaign.status === 'rejected' ? "bg-red-100 text-red-700" :
                       "bg-amber-100 text-amber-700"
                     )}>
                       {selectedCampaign.status.toUpperCase()}
                     </span>
-                    <h2 className="text-3xl font-black text-slate-900 tracking-tight">
+                    <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
                       {selectedCampaign.campaignName || 'Campaign Details'}
                     </h2>
-                    <p className="text-slate-500 font-medium">{selectedCampaign.companyName}</p>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">{selectedCampaign.companyName}</p>
                   </div>
                   <button
                     onClick={() => setSelectedCampaign(null)}
@@ -645,10 +818,10 @@ export const AdminPanel: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-8 mb-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-8 mb-6 sm:mb-8">
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
+                      <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 flex-shrink-0">
                         <Target className="w-5 h-5" />
                       </div>
                       <div>
@@ -657,7 +830,7 @@ export const AdminPanel: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-purple-600">
+                      <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-purple-600 flex-shrink-0">
                         <Package className="w-5 h-5" />
                       </div>
                       <div>
@@ -669,7 +842,7 @@ export const AdminPanel: React.FC = () => {
 
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
+                      <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 flex-shrink-0">
                         <Calendar className="w-5 h-5" />
                       </div>
                       <div>
@@ -680,7 +853,7 @@ export const AdminPanel: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-600">
+                      <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-600 flex-shrink-0">
                         <BarChart3 className="w-5 h-5" />
                       </div>
                       <div>
@@ -691,225 +864,105 @@ export const AdminPanel: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-slate-50 p-6 rounded-3xl mb-8">
-                  <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-blue-600" /> Creative Asset
-                  </h3>
-                  <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">
-                        <Package className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-slate-900">Design File</p>
-                        <p className="text-xs text-slate-500 truncate max-w-[200px]">{selectedCampaign.designUrl}</p>
-                      </div>
-                    </div>
-                    <a
-                      href={selectedCampaign.designUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                    >
-                      <ExternalLink className="w-5 h-5" />
-                    </a>
-                  </div>
-                </div>
-
-                {/* Linked Customer Messages */}
-                {selectedCampaignUserMessages.length > 0 && (
-                  <div className="bg-slate-50 p-6 rounded-3xl mb-8">
-                    <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 text-purple-600" />
-                      Client Messages ({selectedCampaignUserMessages.length})
-                    </h3>
-                    <div className="space-y-3 max-h-40 overflow-y-auto pr-1">
-                      {selectedCampaignUserMessages.map((msg) => (
-                        <div key={msg.id} className="flex justify-between items-start bg-white p-4 rounded-2xl border border-slate-200 text-xs">
-                          <div className="flex-1 min-w-0 mr-4">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className={cn(
-                                "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider",
-                                msg.status === 'resolved' ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                              )}>
-                                {msg.status}
-                              </span>
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                {new Date(msg.createdAt).toLocaleDateString()}
-                              </span>
-                            </div>
-                            <p className="text-slate-600 italic line-clamp-2">"{msg.message}"</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setSelectedSupportRequest(msg);
-                              setSelectedCampaign(null);
-                            }}
-                            className="text-blue-600 hover:text-blue-700 font-bold hover:underline self-center whitespace-nowrap"
-                          >
-                            Open & Reply
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {selectedCampaign.status === 'pending' && (
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => updateStatus(selectedCampaign.id, 'approved')}
-                      className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold hover:bg-green-700 transition-all flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle2 className="w-5 h-5" /> Approve Campaign
-                    </button>
-                    <button
-                      onClick={() => updateStatus(selectedCampaign.id, 'rejected')}
-                      className="flex-1 py-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
-                    >
-                      <XCircle className="w-5 h-5" /> Reject Campaign
-                    </button>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Support Request Details Modal */}
-      <AnimatePresence>
-        {selectedSupportRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedSupportRequest(null)}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden"
-            >
-              <div className="p-8">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <span className={cn(
-                      "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold mb-3",
-                      selectedSupportRequest.status === 'resolved' ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                    )}>
-                      {selectedSupportRequest.status.toUpperCase()}
+                <div className="bg-slate-50 p-6 rounded-3xl mb-6">
+                  <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <Eye className="w-4 h-4 text-blue-600" /> Square Bottle 3D Preview
                     </span>
-                    <h2 className="text-2xl font-bold text-slate-900">Support Message</h2>
-                    <p className="text-slate-500 text-sm">From: {selectedSupportRequest.userEmail}</p>
-                  </div>
-                  <button
-                    onClick={() => setSelectedSupportRequest(null)}
-                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                  >
-                    <XCircle className="w-6 h-6 text-slate-400" />
-                  </button>
-                </div>
+                    <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+                      {selectedCampaign.sides} Side{selectedCampaign.sides > 1 ? 's' : ''} Branded
+                    </span>
+                  </h3>
 
-                <div className="bg-slate-50 p-6 rounded-2xl mb-6">
-                  <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">
-                    {selectedSupportRequest.message}
-                  </p>
-                </div>
-
-                {/* Linked Client's Orders / Campaigns */}
-                {selectedSupportRequestUserCampaigns.length > 0 && (
-                  <div className="bg-slate-50 p-6 rounded-3xl mb-6">
-                    <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                      <Package className="w-4 h-4 text-blue-600" />
-                      Client Campaigns / Orders ({selectedSupportRequestUserCampaigns.length})
-                    </h3>
-                    <div className="space-y-3 max-h-40 overflow-y-auto pr-1">
-                      {selectedSupportRequestUserCampaigns.map((camp) => (
-                        <div key={camp.id} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 text-xs">
-                          <div className="flex-1 min-w-0 mr-4">
-                            <span className={cn(
-                              "px-2 py-0.5 rounded-full text-[9px] font-bold mr-2 uppercase tracking-wide",
-                              camp.status === 'approved' ? "bg-green-100 text-green-700" :
-                              camp.status === 'rejected' ? "bg-red-100 text-red-700" :
-                              "bg-amber-100 text-amber-700"
-                            )}>
-                              {camp.status}
-                            </span>
-                            <span className="font-bold text-slate-800">
-                              {camp.campaignName || 'Untitled Campaign'}
-                            </span>
-                            <span className="text-slate-400 mx-2">|</span>
-                            <span className="text-slate-500">{camp.bottles.toLocaleString()} bottles</span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-blue-600 font-bold">
-                              {formatCurrency(camp.totalPrice)}
-                            </span>
-                            <button
-                              onClick={() => {
-                                setSelectedCampaign(camp);
-                                setSelectedSupportRequest(null);
-                              }}
-                              className="text-blue-600 hover:text-blue-700 font-bold hover:underline"
-                            >
-                              View Details
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {selectedSupportRequest.adminReply && (
-                  <div className="bg-blue-50 p-6 rounded-2xl mb-8 border border-blue-100">
-                    <p className="text-[10px] uppercase tracking-widest text-blue-400 font-bold mb-2">Previous Admin Reply</p>
-                    <p className="text-blue-700 leading-relaxed whitespace-pre-wrap italic">
-                      {selectedSupportRequest.adminReply}
-                    </p>
-                    <p className="text-[10px] text-blue-300 mt-2">
-                      Replied on {new Date(selectedSupportRequest.repliedAt!).toLocaleDateString()}
-                    </p>
-                  </div>
-                )}
-
-                {selectedSupportRequest.status === 'pending' && (
-                  <div className="mb-8">
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">
-                      Send a Reply
-                    </label>
-                    <textarea
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      placeholder="Type your reply to the customer..."
-                      className="w-full px-5 py-4 rounded-2xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all min-h-[120px] text-sm"
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 mb-4">
+                    <BottleVisualizer
+                      selectedSides={selectedCampaign.sides}
+                      designUrls={selectedCampaign.designUrls || (selectedCampaign.designUrl ? [selectedCampaign.designUrl] : [])}
+                      designUrl={selectedCampaign.designUrl}
                     />
                   </div>
-                )}
 
-                <div className="flex gap-4">
-                  {selectedSupportRequest.status === 'pending' && (
-                    <button
-                      onClick={() => sendReply(selectedSupportRequest.id)}
-                      disabled={!replyText.trim()}
-                      className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <MessageSquare className="w-5 h-5" /> Send Reply & Resolve
-                    </button>
+                  {selectedCampaign.designUrls && selectedCampaign.designUrls.length > 1 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold text-slate-700">Artwork for {selectedCampaign.sides} Sides ({selectedCampaign.designUrls.length} Files):</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {selectedCampaign.designUrls.map((url, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200">
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <img src={url} alt={`Side ${idx + 1}`} className="w-8 h-8 object-contain rounded bg-slate-50 border border-slate-100" referrerPolicy="no-referrer" />
+                              <span className="text-xs font-bold text-slate-800 truncate">Side {idx + 1}</span>
+                            </div>
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-bold shrink-0"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">
+                          <Package className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">Design File</p>
+                          <p className="text-xs text-slate-500 truncate max-w-[200px]">{selectedCampaign.designUrl}</p>
+                        </div>
+                      </div>
+                      <a
+                        href={selectedCampaign.designUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold"
+                      >
+                        <span>Open Link</span>
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    </div>
                   )}
-                  <button
-                    onClick={() => {
-                      deleteSupportRequest(selectedSupportRequest.id);
-                      setSelectedSupportRequest(null);
-                    }}
-                    className="flex-1 py-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Trash2 className="w-5 h-5" /> Delete Request
-                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  {selectedCampaign.status === 'pending' ? (
+                    <div className="flex gap-4 flex-1">
+                      <button
+                        onClick={() => updateStatus(selectedCampaign.id, 'approved')}
+                        className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-bold hover:bg-green-700 transition-all flex items-center justify-center gap-2"
+                      >
+                        <CheckCircle2 className="w-5 h-5" /> Approve Campaign
+                      </button>
+                      <button
+                        onClick={() => updateStatus(selectedCampaign.id, 'rejected')}
+                        className="flex-1 py-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                      >
+                        <XCircle className="w-5 h-5" /> Reject Campaign
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-xs text-slate-500">
+                        Campaign is currently <strong className="text-slate-800">{selectedCampaign.status}</strong>.
+                      </span>
+                      {onNavigate && (
+                        <button
+                          onClick={() => {
+                            setSelectedCampaign(null);
+                            onNavigate('messages');
+                          }}
+                          className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-2"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                          Message Client
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>

@@ -53,7 +53,7 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "jmisagor079@gmail.com" && request.auth.token.email_verified == true));
+          ((request.auth.token.email == "jmisagor079@gmail.com" || request.auth.token.email == "tonmoyletar@gmail.com") && request.auth.token.email_verified == true));
     }
 
     function isValidEmail(email) {
@@ -81,14 +81,18 @@ service cloud.firestore {
     }
 
     function isValidCampaign(data) {
-      return hasOnlyAllowedFields(['id', 'userId', 'companyName', 'area', 'bottles', 'sides', 'designUrl', 'totalPrice', 'status', 'createdAt']) &&
-        data.id is string &&
+      return hasOnlyAllowedFields(['userId', 'campaignName', 'companyName', 'area', 'targetAudience', 'startDate', 'endDate', 'bottles', 'sides', 'designUrl', 'designUrls', 'totalPrice', 'status', 'createdAt']) &&
         data.userId is string &&
+        data.campaignName is string && data.campaignName.size() > 0 &&
         data.companyName is string && data.companyName.size() > 0 &&
-        data.area is string &&
-        data.bottles is int && data.bottles > 0 &&
-        data.sides is int && data.sides >= 1 && data.sides <= 4 &&
+        data.area is string && data.area.size() > 0 &&
+        data.targetAudience is string && data.targetAudience.size() > 0 &&
+        data.startDate is string && data.startDate.size() > 0 &&
+        data.endDate is string && data.endDate.size() > 0 &&
+        data.bottles is number && data.bottles > 0 &&
+        data.sides is number && data.sides >= 1 && data.sides <= 4 &&
         data.designUrl is string &&
+        (data.get('designUrls', null) == null || data.designUrls is list) &&
         data.totalPrice is number && data.totalPrice >= 0 &&
         data.status in ['pending', 'approved', 'rejected'] &&
         isValidDateString(data.createdAt);
@@ -110,6 +114,23 @@ service cloud.firestore {
         (data.get('userId', null) == null || data.userId is string) &&
         (data.get('adminReply', null) == null || data.adminReply is string) &&
         (data.get('repliedAt', null) == null || isValidDateString(data.repliedAt));
+    }
+
+    function isValidChatMessage(data) {
+      return hasOnlyAllowedFields(['id', 'senderId', 'senderEmail', 'senderRole', 'senderName', 'recipientId', 'recipientEmail', 'conversationId', 'message', 'campaignId', 'campaignName', 'createdAt', 'read']) &&
+        data.senderId is string && data.senderId.size() > 0 &&
+        data.senderEmail is string && isValidEmail(data.senderEmail) &&
+        data.senderRole in ['admin', 'user'] &&
+        data.recipientId is string &&
+        data.conversationId is string && data.conversationId.size() > 0 &&
+        data.message is string && data.message.size() > 0 &&
+        data.read is bool &&
+        isValidDateString(data.createdAt) &&
+        (data.get('id', null) == null || data.id is string) &&
+        (data.get('senderName', null) == null || data.senderName is string) &&
+        (data.get('recipientEmail', null) == null || data.recipientEmail is string) &&
+        (data.get('campaignId', null) == null || data.campaignId is string) &&
+        (data.get('campaignName', null) == null || data.campaignName is string);
     }
 
     // ===============================================================
@@ -152,6 +173,22 @@ service cloud.firestore {
                        resource.data.userId == request.auth.uid && 
                        request.resource.data.status == resource.data.status && 
                        isValidSupportRequest(request.resource.data));
+      allow delete: if isAdmin();
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() && 
+                    (resource.data.senderId == request.auth.uid || 
+                     resource.data.recipientId == request.auth.uid || 
+                     resource.data.conversationId == request.auth.uid || 
+                     isAdmin());
+      allow create: if isAuthenticated() &&
+                      request.resource.data.senderId == request.auth.uid &&
+                      isValidChatMessage(request.resource.data);
+      allow update: if isAuthenticated() && 
+                      (resource.data.recipientId == request.auth.uid || 
+                       resource.data.conversationId == request.auth.uid || 
+                       isAdmin());
       allow delete: if isAdmin();
     }
   }

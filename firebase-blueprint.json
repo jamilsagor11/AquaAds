@@ -61,6 +61,27 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userEmail", "message", "status", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Direct message exchanged between user and admin in real-time.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderEmail": { "type": "string", "format": "email" },
+        "senderRole": { "type": "string", "enum": ["admin", "user"] },
+        "senderName": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "recipientEmail": { "type": "string", "format": "email" },
+        "conversationId": { "type": "string" },
+        "message": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "campaignName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["senderId", "senderEmail", "senderRole", "recipientId", "conversationId", "message", "createdAt", "read"]
     }
   },
   "firestore": {
@@ -79,6 +100,10 @@
     "/support_requests/{requestId}": {
       "schema": "SupportRequest",
       "description": "Messages for the management team."
+    },
+    "/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Direct chat messages between clients and admin."
     }
   }
 }

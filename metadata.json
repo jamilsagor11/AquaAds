@@ -1,5 +1,6 @@
 {
   "name": "AquaAds - Water Bottle Advertising",
   "description": "A platform for booking advertisements on eco-friendly square paper water bottles. Manage campaigns, track spending, and visualize your ads in real-time.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

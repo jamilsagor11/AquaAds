@@ -1,6 +1,17 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db, onAuthStateChanged, signInWithPopup, signOut, googleProvider, doc, getDoc, setDoc } from './firebase';
 import { UserProfile, UserRole } from './types';
+import { syncProfileToSupabase } from './lib/supabase';
+
+export const ADMIN_EMAILS: string[] = [
+  'jmisagor079@gmail.com',
+  'tonmoyletar@gmail.com',
+];
+
+export const isAdminEmail = (email?: string | null): boolean => {
+  if (!email) return false;
+  return ADMIN_EMAILS.some((admin) => admin.toLowerCase() === email.toLowerCase().trim());
+};
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -19,26 +30,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          if (firebaseUser.email === 'jmisagor079@gmail.com' && userData.role !== 'admin') {
-            const updatedProfile: UserProfile = { ...userData, role: 'admin' };
-            await setDoc(doc(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
-            setUser(updatedProfile);
+        const isUserAdmin = isAdminEmail(firebaseUser.email);
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data() as UserProfile;
+            if (isUserAdmin && userData.role !== 'admin') {
+              const updatedProfile: UserProfile = { ...userData, role: 'admin' };
+              await setDoc(doc(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
+              setUser(updatedProfile);
+              syncProfileToSupabase(updatedProfile);
+            } else {
+              setUser(userData);
+              syncProfileToSupabase(userData);
+            }
           } else {
-            setUser(userData);
+            // Create new user profile
+            const newUser: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              role: isUserAdmin ? 'admin' : 'user',
+              createdAt: new Date().toISOString(),
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+            setUser(newUser);
+            syncProfileToSupabase(newUser);
           }
-        } else {
-          // Create new user profile
-          const newUser: UserProfile = {
+        } catch (error) {
+          console.warn('Could not fetch user profile from Firestore, using auth fallback:', error);
+          const fallbackUser: UserProfile = {
             uid: firebaseUser.uid,
             email: firebaseUser.email || '',
-            role: firebaseUser.email === 'jmisagor079@gmail.com' ? 'admin' : 'user',
+            role: isUserAdmin ? 'admin' : 'user',
             createdAt: new Date().toISOString(),
           };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-          setUser(newUser);
+          setUser(fallbackUser);
+          syncProfileToSupabase(fallbackUser);
         }
       } else {
         setUser(null);
@@ -66,7 +93,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAdmin: user?.role === 'admin' }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        logout,
+        isAdmin: user?.role === 'admin' || isAdminEmail(user?.email),
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

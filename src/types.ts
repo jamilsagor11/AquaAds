@@ -19,6 +19,7 @@ export interface Campaign {
   bottles: number;
   sides: number;
   designUrl: string;
+  designUrls?: string[];
   targetAudience: string;
   startDate: string;
   endDate: string;
@@ -33,13 +34,27 @@ export interface Area {
   basePrice: number;
 }
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderEmail: string;
+  senderRole: UserRole;
+  senderName?: string;
+  recipientId: string;
+  recipientEmail?: string;
+  conversationId: string;
+  message: string;
+  campaignId?: string;
+  campaignName?: string;
+  createdAt: string;
+  read: boolean;
+}
+
 export interface SupportRequest {
   id: string;
   userId?: string;
   userEmail: string;
   message: string;
-  adminReply?: string;
-  repliedAt?: string;
   status: 'pending' | 'resolved';
   createdAt: string;
 }
@@ -71,3 +86,4 @@ export interface FirestoreErrorInfo {
     }[];
   };
 }
+
