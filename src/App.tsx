@@ -17,7 +17,7 @@ import { motion } from 'motion/react';
 
 
 const LandingPage: React.FC = () => {
-  const { login } = useAuth();
+  const { login, isLoggingIn } = useAuth();
 
   return (
     <div className="min-h-screen bg-white overflow-hidden">
@@ -29,9 +29,17 @@ const LandingPage: React.FC = () => {
         </div>
         <button
           onClick={login}
-          className="px-6 py-2.5 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
+          disabled={isLoggingIn}
+          className="px-6 py-2.5 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-70 flex items-center gap-2 cursor-pointer"
         >
-          Get Started
+          {isLoggingIn ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <span>Connecting...</span>
+            </>
+          ) : (
+            'Get Started'
+          )}
         </button>
       </nav>
 
@@ -51,9 +59,20 @@ const LandingPage: React.FC = () => {
           <div className="flex flex-wrap gap-4">
             <button
               onClick={login}
-              className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold text-lg hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex items-center gap-2 group"
+              disabled={isLoggingIn}
+              className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold text-lg hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex items-center gap-2 group disabled:opacity-70 cursor-pointer"
             >
-              Launch Your Campaign <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              {isLoggingIn ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Connecting to Google...</span>
+                </>
+              ) : (
+                <>
+                  <span>Launch Your Campaign</span>
+                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </>
+              )}
             </button>
           </div>
           
