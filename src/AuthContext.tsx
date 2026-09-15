@@ -51,15 +51,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
-          console.log('Redirect sign-in successful for:', result.user.email);
+          console.info('Redirect sign-in successful for:', result.user.email);
         }
       })
       .catch((error: any) => {
-        console.error('Redirect sign-in error:', error);
-        if (error?.code) {
+        const code = error?.code || '';
+        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+          return;
+        }
+        console.warn('Redirect sign-in notice:', error);
+        if (code) {
           setAuthError({
-            code: error.code,
-            message: error.message || 'Redirect sign-in failed',
+            code,
+            message: error?.message || 'Redirect sign-in notice',
             domain: typeof window !== 'undefined' ? window.location.hostname : '',
           });
         }
@@ -121,22 +125,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
-      console.error('Login failed:', error);
       const code = error?.code || 'unknown';
+
+      // When the user dismisses or closes the popup window, quietly reset state
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        console.info('Google sign-in popup was closed by user.');
+        return;
+      }
 
       // If popup was blocked by browser or mobile Safari, try redirect fallback
       if (code === 'auth/popup-blocked') {
+        console.warn('Popup blocked, attempting redirect sign-in fallback...');
         try {
           await signInWithRedirect(auth, googleProvider);
           return;
         } catch (redirectError: any) {
+          const redirectCode = redirectError?.code || 'auth/popup-blocked';
+          if (redirectCode === 'auth/popup-closed-by-user' || redirectCode === 'auth/cancelled-popup-request') {
+            return;
+          }
           setAuthError({
-            code: redirectError?.code || 'auth/popup-blocked',
+            code: redirectCode,
             message: redirectError?.message || 'Popup was blocked by your browser.',
             domain: typeof window !== 'undefined' ? window.location.hostname : '',
           });
         }
       } else {
+        console.warn('Authentication status:', code);
         setAuthError({
           code,
           message: error?.message || 'Authentication error',
@@ -154,9 +169,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithRedirect(auth, googleProvider);
     } catch (error: any) {
-      console.error('Redirect login failed:', error);
+      const code = error?.code || 'unknown';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setIsLoggingIn(false);
+        return;
+      }
+      console.warn('Redirect login status:', code);
       setAuthError({
-        code: error?.code || 'unknown',
+        code,
         message: error?.message || 'Redirect sign-in failed',
         domain: typeof window !== 'undefined' ? window.location.hostname : '',
       });

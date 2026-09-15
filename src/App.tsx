@@ -17,7 +17,7 @@ import { motion } from 'motion/react';
 
 
 const LandingPage: React.FC = () => {
-  const { login, isLoggingIn } = useAuth();
+  const { login, loginWithRedirect, isLoggingIn } = useAuth();
 
   return (
     <div className="min-h-screen bg-white overflow-hidden">
@@ -56,7 +56,7 @@ const LandingPage: React.FC = () => {
             The world's first square-shaped paper water bottle advertising platform. 
             Reach thousands of customers with eco-friendly, high-impact branding.
           </p>
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <button
               onClick={login}
               disabled={isLoggingIn}
@@ -73,6 +73,13 @@ const LandingPage: React.FC = () => {
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
+            </button>
+            <button
+              onClick={loginWithRedirect}
+              disabled={isLoggingIn}
+              className="text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors py-2 px-1 underline underline-offset-4 cursor-pointer"
+            >
+              Pop-up blocked? Sign in with redirect
             </button>
           </div>
           

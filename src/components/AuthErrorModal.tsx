@@ -24,13 +24,13 @@ export const AuthErrorModal: React.FC<AuthErrorModalProps> = ({
   const [copied, setCopied] = useState(false);
 
   if (!error) return null;
+  if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+    return null;
+  }
 
   const currentDomain = error.domain || (typeof window !== 'undefined' ? window.location.hostname : '');
   const isUnauthorizedDomain = error.code === 'auth/unauthorized-domain';
   const isPopupBlocked = error.code === 'auth/popup-blocked';
-  const isUserCancelled =
-    error.code === 'auth/popup-closed-by-user' ||
-    error.code === 'auth/cancelled-popup-request';
 
   const firebaseConsoleUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
 
@@ -68,9 +68,7 @@ export const AuthErrorModal: React.FC<AuthErrorModalProps> = ({
                     ? 'Authorize Domain in Firebase'
                     : isPopupBlocked
                     ? 'Pop-up Window Blocked'
-                    : isUserCancelled
-                    ? 'Sign-in Cancelled'
-                    : 'Sign-in Error'}
+                    : 'Sign-in Notice'}
                 </h3>
                 <p className="text-xs font-medium text-white/90 mt-0.5">
                   {isUnauthorizedDomain
