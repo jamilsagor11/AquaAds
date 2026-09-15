@@ -65,8 +65,8 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     return;
   }
 
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  // Gracefully log warning without crashing React components
+  console.warn('Firestore Operation Notice (Fallback active):', JSON.stringify(errInfo));
 }
 
 export {

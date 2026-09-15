@@ -7,6 +7,7 @@ import { Clock, CheckCircle2, XCircle, TrendingUp, Wallet, Package, Eye, Calenda
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../firebase';
 import { BottleVisualizer } from './BottleVisualizer';
+import { getLocalCampaigns } from '../lib/localData';
 
 interface DashboardProps {
   onNavigate?: (tab: string) => void;
@@ -14,29 +15,64 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const { user } = useAuth();
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() => {
+    const local = getLocalCampaigns();
+    if (!user) return local;
+    const userLocal = local.filter(c => c.userId === user.uid || c.userId === 'demo_user_1');
+    return userLocal.length > 0 ? userLocal : local;
+  });
+  const [loading, setLoading] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
 
   useEffect(() => {
     if (!user) return;
 
-    const qCampaigns = query(
-      collection(db, 'campaigns'),
-      where('userId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
+    // Refresh from local storage
+    const loadLocal = () => {
+      const allLocal = getLocalCampaigns();
+      const filtered = allLocal.filter(c => c.userId === user.uid || c.userId === 'demo_user_1');
+      setCampaigns(prev => {
+        const map = new Map<string, Campaign>();
+        filtered.forEach(c => map.set(c.id, c));
+        prev.forEach(c => map.set(c.id, c));
+        return Array.from(map.values());
+      });
+    };
 
-    const unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
-      setCampaigns(data);
+    window.addEventListener('aquaads_campaigns_updated', loadLocal);
+
+    // Also attempt real-time Firestore sync
+    let unsubCampaigns = () => {};
+    try {
+      const qCampaigns = query(
+        collection(db, 'campaigns'),
+        where('userId', '==', user.uid),
+        orderBy('createdAt', 'desc')
+      );
+
+      unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
+        const firestoreData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
+        const allLocal = getLocalCampaigns().filter(c => c.userId === user.uid || c.userId === 'demo_user_1');
+        
+        // Merge without duplicates
+        const mergedMap = new Map<string, Campaign>();
+        firestoreData.forEach(c => mergedMap.set(c.id, c));
+        allLocal.forEach(c => {
+          if (!mergedMap.has(c.id)) mergedMap.set(c.id, c);
+        });
+        
+        setCampaigns(Array.from(mergedMap.values()));
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'campaigns');
+        setLoading(false);
+      });
+    } catch {
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'campaigns');
-      setLoading(false);
-    });
+    }
 
     return () => {
+      window.removeEventListener('aquaads_campaigns_updated', loadLocal);
       unsubCampaigns();
     };
   }, [user]);

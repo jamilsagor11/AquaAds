@@ -5,6 +5,7 @@ import { OperationType } from '../types';
 import { BottleVisualizer } from './BottleVisualizer';
 import { formatCurrency } from '../lib/utils';
 import { syncCampaignToSupabase } from '../lib/supabase';
+import { saveLocalCampaign } from '../lib/localData';
 import { 
   Calculator, 
   MapPin, 
@@ -183,8 +184,16 @@ export const CampaignForm: React.FC = () => {
         createdAt: new Date().toISOString(),
       };
       
-      const docRef = await addDoc(collection(db, path), campaignPayload);
-      syncCampaignToSupabase({ id: docRef.id, ...campaignPayload });
+      const localId = 'camp_' + Date.now();
+      const newCampaign = { id: localId, ...campaignPayload };
+      saveLocalCampaign(newCampaign);
+
+      try {
+        const docRef = await addDoc(collection(db, path), campaignPayload);
+        syncCampaignToSupabase({ id: docRef.id, ...campaignPayload });
+      } catch (dbError) {
+        console.warn('Database save notice (saved to local storage):', dbError);
+      }
 
       setSuccess(true);
       setTimeout(() => {

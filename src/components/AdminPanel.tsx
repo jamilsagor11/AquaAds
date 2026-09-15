@@ -8,6 +8,7 @@ import { handleFirestoreError, OperationType } from '../firebase';
 import { BottleVisualizer } from './BottleVisualizer';
 import { supabase, checkSupabaseHealth, syncCampaignToSupabase, syncProfileToSupabase, SUPABASE_URL, SupabaseHealthStatus } from '../lib/supabase';
 import { useAuth, isAdminEmail } from '../AuthContext';
+import { getLocalCampaigns, updateLocalCampaignStatus, deleteLocalCampaign, getLocalUsers } from '../lib/localData';
 
 interface AdminPanelProps {
   onNavigate?: (tab: string) => void;
@@ -15,9 +16,9 @@ interface AdminPanelProps {
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   const { user, isAdmin } = useAuth();
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() => getLocalCampaigns());
+  const [users, setUsers] = useState<UserProfile[]>(() => getLocalUsers());
+  const [loading, setLoading] = useState(false);
   const [activeAdminTab, setActiveAdminTab] = useState<'campaigns' | 'users' | 'supabase'>('campaigns');
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -110,15 +111,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
 
     const unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
-      setCampaigns(data);
+      const local = getLocalCampaigns();
+      const mergedMap = new Map<string, Campaign>();
+      data.forEach(c => mergedMap.set(c.id, c));
+      local.forEach(c => {
+        if (!mergedMap.has(c.id)) mergedMap.set(c.id, c);
+      });
+      setCampaigns(Array.from(mergedMap.values()));
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'campaigns');
+      setLoading(false);
     });
 
     const unsubUsers = onSnapshot(qUsers, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
-      setUsers(data);
+      const localUsers = getLocalUsers();
+      const mergedMap = new Map<string, UserProfile>();
+      data.forEach(u => mergedMap.set(u.uid, u));
+      localUsers.forEach(u => {
+        if (!mergedMap.has(u.uid)) mergedMap.set(u.uid, u);
+      });
+      setUsers(Array.from(mergedMap.values()));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'users');
     });
@@ -130,11 +144,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   }, [isAuthorized]);
 
   const updateStatus = async (id: string, status: 'approved' | 'rejected') => {
+    // Immediately apply locally
+    updateLocalCampaignStatus(id, status);
+    setCampaigns(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+    if (selectedCampaign?.id === id) {
+      setSelectedCampaign(prev => prev ? { ...prev, status } : null);
+    }
+
     try {
       await updateDoc(doc(db, 'campaigns', id), { status });
-      if (selectedCampaign?.id === id) {
-        setSelectedCampaign(prev => prev ? { ...prev, status } : null);
-      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `campaigns/${id}`);
     }
@@ -142,11 +160,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
 
   const deleteCampaign = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this campaign? This action cannot be undone.')) return;
+    
+    // Immediately apply locally
+    deleteLocalCampaign(id);
+    setCampaigns(prev => prev.filter(c => c.id !== id));
+    if (selectedCampaign?.id === id) {
+      setSelectedCampaign(null);
+    }
+
     try {
       await deleteDoc(doc(db, 'campaigns', id));
-      if (selectedCampaign?.id === id) {
-        setSelectedCampaign(null);
-      }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `campaigns/${id}`);
     }

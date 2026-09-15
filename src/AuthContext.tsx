@@ -15,6 +15,8 @@ import {
 import { UserProfile, UserRole } from './types';
 import { syncProfileToSupabase } from './lib/supabase';
 import { AuthErrorModal, AuthErrorInfo } from './components/AuthErrorModal';
+import { LoginModal } from './components/LoginModal';
+import { saveLocalUser } from './lib/localData';
 
 export const ADMIN_EMAILS: string[] = [
   'jmisagor079@gmail.com',
@@ -31,7 +33,12 @@ interface AuthContextType {
   loading: boolean;
   isLoggingIn: boolean;
   authError: AuthErrorInfo | null;
-  login: () => Promise<void>;
+  isLoginModalOpen: boolean;
+  openLoginModal: () => void;
+  closeLoginModal: () => void;
+  loginDirect: (email: string, companyName?: string, role?: UserRole) => void;
+  login: () => void;
+  loginWithGooglePopup: () => Promise<void>;
   loginWithRedirect: () => Promise<void>;
   logout: () => Promise<void>;
   clearAuthError: () => void;
@@ -41,10 +48,19 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    try {
+      const cached = localStorage.getItem('aquaads_session_user');
+      if (cached) return JSON.parse(cached);
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authError, setAuthError] = useState<AuthErrorInfo | null>(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   // Check for redirect result on load (for mobile / redirect sign-in flows)
   useEffect(() => {
@@ -60,13 +76,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
         console.warn('Redirect sign-in notice:', error);
-        if (code) {
-          setAuthError({
-            code,
-            message: error?.message || 'Redirect sign-in notice',
-            domain: typeof window !== 'undefined' ? window.location.hostname : '',
-          });
-        }
       });
   }, []);
 
@@ -74,6 +83,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const isUserAdmin = isAdminEmail(firebaseUser.email);
+        const resolvedUser: UserProfile = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          role: isUserAdmin ? 'admin' : 'user',
+          companyName: isUserAdmin ? 'AquaAds Operations' : 'Advertiser',
+          createdAt: new Date().toISOString(),
+        };
+
+        // Immediately set user in state and local storage so zero-database login works
+        setUser(resolvedUser);
+        localStorage.setItem('aquaads_session_user', JSON.stringify(resolvedUser));
+        saveLocalUser(resolvedUser);
+
+        // Optional background sync with Firestore if available
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
@@ -82,36 +105,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const updatedProfile: UserProfile = { ...userData, role: 'admin' };
               await setDoc(doc(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
               setUser(updatedProfile);
+              localStorage.setItem('aquaads_session_user', JSON.stringify(updatedProfile));
               syncProfileToSupabase(updatedProfile);
             } else {
               setUser(userData);
+              localStorage.setItem('aquaads_session_user', JSON.stringify(userData));
               syncProfileToSupabase(userData);
             }
           } else {
-            // Create new user profile
-            const newUser: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              role: isUserAdmin ? 'admin' : 'user',
-              createdAt: new Date().toISOString(),
-            };
-            await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-            setUser(newUser);
-            syncProfileToSupabase(newUser);
+            await setDoc(doc(db, 'users', firebaseUser.uid), resolvedUser);
+            syncProfileToSupabase(resolvedUser);
           }
-        } catch (error) {
-          console.warn('Could not fetch user profile from Firestore, using auth fallback:', error);
-          const fallbackUser: UserProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            role: isUserAdmin ? 'admin' : 'user',
-            createdAt: new Date().toISOString(),
-          };
-          setUser(fallbackUser);
-          syncProfileToSupabase(fallbackUser);
+        } catch {
+          // Graceful fallback when Firestore is unavailable or offline
         }
-      } else {
-        setUser(null);
       }
       setLoading(false);
     });
@@ -119,23 +126,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  const login = async () => {
+  // Direct login without database
+  const loginDirect = (email: string, companyName?: string, role?: UserRole) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const isUserAdmin = isAdminEmail(cleanEmail);
+    const assignedRole: UserRole = role || (isUserAdmin ? 'admin' : 'user');
+
+    const profile: UserProfile = {
+      uid: 'user_' + btoa(cleanEmail).replace(/[^a-zA-Z0-9]/g, '').slice(0, 14),
+      email: cleanEmail,
+      role: assignedRole,
+      companyName: companyName?.trim() || (assignedRole === 'admin' ? 'AquaAds Leadership' : 'Brand Advertiser'),
+      createdAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem('aquaads_session_user', JSON.stringify(profile));
+    saveLocalUser(profile);
+    setUser(profile);
+    setIsLoginModalOpen(false);
+  };
+
+  const openLoginModal = () => {
+    setIsLoginModalOpen(true);
+  };
+
+  const closeLoginModal = () => {
+    setIsLoginModalOpen(false);
+  };
+
+  // Default login action now opens the instant Login Modal
+  const login = () => {
+    openLoginModal();
+  };
+
+  // Google popup login option
+  const loginWithGooglePopup = async () => {
     setAuthError(null);
     setIsLoggingIn(true);
     try {
       await signInWithPopup(auth, googleProvider);
+      setIsLoginModalOpen(false);
     } catch (error: any) {
       const code = error?.code || 'unknown';
 
-      // When the user dismisses or closes the popup window, quietly reset state
       if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-        console.info('Google sign-in popup was closed by user.');
         return;
       }
 
-      // If popup was blocked by browser or mobile Safari, try redirect fallback
       if (code === 'auth/popup-blocked') {
-        console.warn('Popup blocked, attempting redirect sign-in fallback...');
         try {
           await signInWithRedirect(auth, googleProvider);
           return;
@@ -151,7 +189,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
         }
       } else {
-        console.warn('Authentication status:', code);
         setAuthError({
           code,
           message: error?.message || 'Authentication error',
@@ -174,7 +211,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsLoggingIn(false);
         return;
       }
-      console.warn('Redirect login status:', code);
       setAuthError({
         code,
         message: error?.message || 'Redirect sign-in failed',
@@ -186,9 +222,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      localStorage.removeItem('aquaads_session_user');
+      setUser(null);
       await signOut(auth);
     } catch (error) {
-      console.error('Logout failed:', error);
+      console.warn('Logout notice:', error);
+      setUser(null);
     }
   };
 
@@ -203,7 +242,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         isLoggingIn,
         authError,
+        isLoginModalOpen,
+        openLoginModal,
+        closeLoginModal,
+        loginDirect,
         login,
+        loginWithGooglePopup,
         loginWithRedirect,
         logout,
         clearAuthError,
@@ -211,10 +255,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }}
     >
       {children}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={closeLoginModal}
+      />
       <AuthErrorModal
         error={authError}
         onClose={clearAuthError}
-        onRetryPopup={login}
+        onRetryPopup={loginWithGooglePopup}
         onRetryRedirect={loginWithRedirect}
       />
     </AuthContext.Provider>

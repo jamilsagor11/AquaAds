@@ -59,27 +59,17 @@ const LandingPage: React.FC = () => {
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <button
               onClick={login}
-              disabled={isLoggingIn}
-              className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold text-lg hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex items-center gap-2 group disabled:opacity-70 cursor-pointer"
+              className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold text-lg hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex items-center gap-2 group cursor-pointer"
             >
-              {isLoggingIn ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Connecting to Google...</span>
-                </>
-              ) : (
-                <>
-                  <span>Launch Your Campaign</span>
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </>
-              )}
+              <span>Launch Your Campaign</span>
+              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
             <button
-              onClick={loginWithRedirect}
-              disabled={isLoggingIn}
-              className="text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors py-2 px-1 underline underline-offset-4 cursor-pointer"
+              onClick={login}
+              className="text-xs font-semibold text-slate-600 hover:text-blue-600 transition-colors py-2 px-3 rounded-xl bg-slate-100/80 hover:bg-blue-50 border border-slate-200/60 cursor-pointer flex items-center gap-1.5"
             >
-              Pop-up blocked? Sign in with redirect
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Login without database (1-Click)</span>
             </button>
           </div>
           
