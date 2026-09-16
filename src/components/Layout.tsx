@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { LogOut, LayoutDashboard, PlusCircle, ShieldCheck, Droplets, MessageSquare, Menu, X, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, collection, query, where, onSnapshot } from '../firebase';
+import { db, auth, collection, query, where, onSnapshot } from '../firebase';
+import { getLocalMessages } from '../lib/localData';
 import { cn } from '../lib/utils';
 
 interface LayoutProps {
@@ -13,37 +14,67 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab }) => {
   const { user, logout, isAdmin } = useAuth();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(() => {
+    if (!user) return 0;
+    const all = getLocalMessages();
+    if (isAdmin) {
+      return all.filter(m => m.senderRole === 'user' && !m.read).length;
+    } else {
+      return all.filter(m => m.conversationId === user.uid && m.senderRole === 'admin' && !m.read).length;
+    }
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Subscribe to unread messages
+  // Sync with local messages updates
   useEffect(() => {
     if (!user) return;
+    const calcLocalUnread = () => {
+      const all = getLocalMessages();
+      if (isAdmin) {
+        setUnreadCount(all.filter(m => m.senderRole === 'user' && !m.read).length);
+      } else {
+        setUnreadCount(all.filter(m => m.conversationId === user.uid && m.senderRole === 'admin' && !m.read).length);
+      }
+    };
 
-    if (isAdmin) {
-      // Admin sees unread messages sent by users
-      const q = query(
-        collection(db, 'messages'),
-        where('senderRole', '==', 'user'),
-        where('read', '==', false)
-      );
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        setUnreadCount(snapshot.size);
-      }, () => {});
-      return () => unsubscribe();
-    } else {
-      // User sees unread messages sent to their conversation by admin
-      const q = query(
-        collection(db, 'messages'),
-        where('conversationId', '==', user.uid),
-        where('senderRole', '==', 'admin'),
-        where('read', '==', false)
-      );
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        setUnreadCount(snapshot.size);
-      }, () => {});
-      return () => unsubscribe();
-    }
+    calcLocalUnread();
+    window.addEventListener('aquaads_messages_updated', calcLocalUnread);
+    return () => {
+      window.removeEventListener('aquaads_messages_updated', calcLocalUnread);
+    };
+  }, [user, isAdmin]);
+
+  // Subscribe to unread messages in Firestore if authenticated
+  useEffect(() => {
+    if (!user || !auth.currentUser) return;
+
+    let unsubscribe = () => {};
+    try {
+      if (isAdmin) {
+        // Admin sees unread messages sent by users
+        const q = query(
+          collection(db, 'messages'),
+          where('senderRole', '==', 'user'),
+          where('read', '==', false)
+        );
+        unsubscribe = onSnapshot(q, (snapshot) => {
+          setUnreadCount(snapshot.size);
+        }, () => {});
+      } else {
+        // User sees unread messages sent to their conversation by admin
+        const q = query(
+          collection(db, 'messages'),
+          where('conversationId', '==', user.uid),
+          where('senderRole', '==', 'admin'),
+          where('read', '==', false)
+        );
+        unsubscribe = onSnapshot(q, (snapshot) => {
+          setUnreadCount(snapshot.size);
+        }, () => {});
+      }
+    } catch {}
+
+    return () => unsubscribe();
   }, [user, isAdmin]);
 
   // Close mobile drawer when active tab changes

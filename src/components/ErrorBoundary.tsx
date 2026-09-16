@@ -56,12 +56,20 @@ export class ErrorBoundary extends React.Component<Props, State> {
                 {errorMessage}
               </p>
             </div>
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
-            >
-              <RefreshCcw className="w-5 h-5" /> Reload Application
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={() => this.setState({ hasError: false, error: null })}
+                className="flex-1 py-3.5 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-md shadow-blue-200"
+              >
+                Try Again
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="flex-1 py-3.5 bg-slate-100 text-slate-700 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all"
+              >
+                <RefreshCcw className="w-4 h-4" /> Reload
+              </button>
+            </div>
             {isFirestoreError && (
               <p className="mt-4 text-[10px] text-slate-400 uppercase tracking-widest">
                 This error has been logged for our technical team.

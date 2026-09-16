@@ -16,7 +16,7 @@ import { UserProfile, UserRole } from './types';
 import { syncProfileToSupabase } from './lib/supabase';
 import { AuthErrorModal, AuthErrorInfo } from './components/AuthErrorModal';
 import { LoginModal } from './components/LoginModal';
-import { saveLocalUser } from './lib/localData';
+import { saveLocalUser, getLocalUsers } from './lib/localData';
 
 export const ADMIN_EMAILS: string[] = [
   'jmisagor079@gmail.com',
@@ -34,10 +34,12 @@ interface AuthContextType {
   isLoggingIn: boolean;
   authError: AuthErrorInfo | null;
   isLoginModalOpen: boolean;
-  openLoginModal: () => void;
+  loginModalTab: 'login' | 'signup';
+  openLoginModal: (tab?: 'login' | 'signup') => void;
   closeLoginModal: () => void;
-  loginDirect: (email: string, companyName?: string, role?: UserRole) => void;
-  login: () => void;
+  loginDirect: (email: string, companyName?: string, role?: UserRole, displayName?: string) => void;
+  signupDirect: (email: string, displayName?: string, companyName?: string, role?: UserRole) => void;
+  login: (tab?: 'login' | 'signup') => void;
   loginWithGooglePopup: () => Promise<void>;
   loginWithRedirect: () => Promise<void>;
   logout: () => Promise<void>;
@@ -61,6 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authError, setAuthError] = useState<AuthErrorInfo | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginModalTab, setLoginModalTab] = useState<'login' | 'signup'>('login');
 
   // Check for redirect result on load (for mobile / redirect sign-in flows)
   useEffect(() => {
@@ -127,7 +130,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // Direct login without database
-  const loginDirect = (email: string, companyName?: string, role?: UserRole) => {
+  const loginDirect = (email: string, companyName?: string, role?: UserRole, displayName?: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const isUserAdmin = isAdminEmail(cleanEmail);
+    const assignedRole: UserRole = role || (isUserAdmin ? 'admin' : 'user');
+
+    // Try to find if user already exists locally
+    const existingUsers = getLocalUsers();
+    const matched = existingUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+
+    const profile: UserProfile = {
+      uid: matched?.uid || 'user_' + btoa(cleanEmail).replace(/[^a-zA-Z0-9]/g, '').slice(0, 14),
+      email: cleanEmail,
+      displayName: displayName?.trim() || matched?.displayName || (isUserAdmin ? (cleanEmail.includes('jmi') ? 'Jmi Sagor' : 'Tonmoy Letar') : cleanEmail.split('@')[0]),
+      role: assignedRole,
+      companyName: companyName?.trim() || matched?.companyName || (assignedRole === 'admin' ? 'AquaAds Leadership' : 'Brand Advertiser'),
+      createdAt: matched?.createdAt || new Date().toISOString(),
+    };
+
+    localStorage.setItem('aquaads_session_user', JSON.stringify(profile));
+    saveLocalUser(profile);
+    setUser(profile);
+    setIsLoginModalOpen(false);
+  };
+
+  // Direct signup without database
+  const signupDirect = (email: string, displayName?: string, companyName?: string, role?: UserRole) => {
     const cleanEmail = email.trim().toLowerCase();
     const isUserAdmin = isAdminEmail(cleanEmail);
     const assignedRole: UserRole = role || (isUserAdmin ? 'admin' : 'user');
@@ -135,8 +163,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const profile: UserProfile = {
       uid: 'user_' + btoa(cleanEmail).replace(/[^a-zA-Z0-9]/g, '').slice(0, 14),
       email: cleanEmail,
+      displayName: displayName?.trim() || (isUserAdmin ? (cleanEmail.includes('jmi') ? 'Jmi Sagor' : 'Tonmoy Letar') : cleanEmail.split('@')[0]),
       role: assignedRole,
-      companyName: companyName?.trim() || (assignedRole === 'admin' ? 'AquaAds Leadership' : 'Brand Advertiser'),
+      companyName: companyName?.trim() || (assignedRole === 'admin' ? 'AquaAds Operations' : 'Brand Advertiser'),
       createdAt: new Date().toISOString(),
     };
 
@@ -146,7 +175,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoginModalOpen(false);
   };
 
-  const openLoginModal = () => {
+  const openLoginModal = (tab: 'login' | 'signup' = 'login') => {
+    setLoginModalTab(tab);
     setIsLoginModalOpen(true);
   };
 
@@ -155,8 +185,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Default login action now opens the instant Login Modal
-  const login = () => {
-    openLoginModal();
+  const login = (tab: 'login' | 'signup' = 'login') => {
+    openLoginModal(tab);
   };
 
   // Google popup login option
@@ -243,9 +273,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoggingIn,
         authError,
         isLoginModalOpen,
+        loginModalTab,
         openLoginModal,
         closeLoginModal,
         loginDirect,
+        signupDirect,
         login,
         loginWithGooglePopup,
         loginWithRedirect,
@@ -257,6 +289,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {children}
       <LoginModal
         isOpen={isLoginModalOpen}
+        initialTab={loginModalTab}
         onClose={closeLoginModal}
       />
       <AuthErrorModal

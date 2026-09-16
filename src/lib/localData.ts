@@ -98,7 +98,19 @@ export const deleteLocalCampaign = (id: string): void => {
 export const getLocalMessages = (): ChatMessage[] => {
   try {
     const raw = localStorage.getItem(MESSAGES_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed: ChatMessage[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Strictly deduplicate by message id to prevent duplicate keys
+    const seen = new Set<string>();
+    const deduped: ChatMessage[] = [];
+    for (const item of parsed) {
+      if (item && item.id && !seen.has(item.id)) {
+        seen.add(item.id);
+        deduped.push(item);
+      }
+    }
+    return deduped;
   } catch {
     return [];
   }
@@ -107,7 +119,14 @@ export const getLocalMessages = (): ChatMessage[] => {
 export const saveLocalMessage = (msg: ChatMessage): void => {
   try {
     const current = getLocalMessages();
-    const updated = [...current, msg];
+    const existingIndex = current.findIndex((m) => m.id === msg.id);
+    let updated: ChatMessage[];
+    if (existingIndex >= 0) {
+      updated = [...current];
+      updated[existingIndex] = msg;
+    } else {
+      updated = [...current, msg];
+    }
     localStorage.setItem(MESSAGES_KEY, JSON.stringify(updated));
     window.dispatchEvent(new Event('aquaads_messages_updated'));
   } catch (err) {
@@ -123,6 +142,7 @@ export const getLocalUsers = (): UserProfile[] => {
         {
           uid: 'admin_jmi',
           email: 'jmisagor079@gmail.com',
+          displayName: 'Jmi Sagor',
           role: 'admin',
           companyName: 'AquaAds Core Team',
           createdAt: new Date().toISOString(),
@@ -130,6 +150,7 @@ export const getLocalUsers = (): UserProfile[] => {
         {
           uid: 'admin_tonmoy',
           email: 'tonmoyletar@gmail.com',
+          displayName: 'Tonmoy Letar',
           role: 'admin',
           companyName: 'AquaAds Operations',
           createdAt: new Date().toISOString(),
@@ -137,6 +158,7 @@ export const getLocalUsers = (): UserProfile[] => {
         {
           uid: 'demo_user_1',
           email: 'demo@business.com',
+          displayName: 'Alex Rivers',
           role: 'user',
           companyName: 'PureTech Hydration',
           createdAt: new Date().toISOString(),

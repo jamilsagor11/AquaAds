@@ -1,293 +1,399 @@
-import React, { useState } from 'react';
-import { X, Shield, User, Building2, ArrowRight, Sparkles, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Mail, Lock, Eye, EyeOff, User, Building2, ArrowRight, ShieldCheck, Droplets } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 
 interface LoginModalProps {
   isOpen: boolean;
+  initialTab?: 'login' | 'signup';
   onClose: () => void;
 }
 
-export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
-  const { loginDirect, login, loginWithRedirect, isLoggingIn } = useAuth();
-  const [email, setEmail] = useState('');
-  const [companyName, setCompanyName] = useState('');
-  const [activeTab, setActiveTab] = useState<'quick' | 'custom' | 'google'>('quick');
+export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, initialTab = 'login', onClose }) => {
+  const { loginDirect, signupDirect } = useAuth();
+  const [activeTab, setActiveTab] = useState<'login' | 'signup'>(initialTab);
+
+  // Login form state
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+
+  // Signup form state
+  const [signupName, setSignupName] = useState('');
+  const [signupCompany, setSignupCompany] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+
+  // Error feedback
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Synchronize initialTab when modal opens & reset errors
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+      setFormError(null);
+    }
+  }, [isOpen, initialTab]);
+
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const handleCustomSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) return;
-    loginDirect(email.trim(), companyName.trim());
-    onClose();
-  };
+    setFormError(null);
 
-  const handleQuickLogin = (selectedEmail: string, company?: string) => {
-    loginDirect(selectedEmail, company);
-    onClose();
-  };
-
-  const handleGoogleLogin = async () => {
-    try {
-      await login();
-      onClose();
-    } catch {
-      // Handled in AuthContext
+    const cleanEmail = loginEmail.trim();
+    if (!cleanEmail) {
+      setFormError('Please enter your email address.');
+      return;
     }
+
+    if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setFormError('Please enter a valid email address.');
+      return;
+    }
+
+    loginDirect(cleanEmail);
+    onClose();
+  };
+
+  const handleSignupSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+
+    const cleanEmail = signupEmail.trim();
+    const cleanName = signupName.trim();
+    const cleanCompany = signupCompany.trim();
+
+    if (!cleanEmail) {
+      setFormError('Please enter your work email.');
+      return;
+    }
+
+    if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setFormError('Please enter a valid email address.');
+      return;
+    }
+
+    if (!signupPassword || signupPassword.length < 4) {
+      setFormError('Password must be at least 4 characters long.');
+      return;
+    }
+
+    signupDirect(cleanEmail, cleanName || undefined, cleanCompany || undefined);
+    onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
-        {/* Modal Header */}
-        <div className="p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white relative">
+    <div
+      id="login-modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200"
+    >
+      <div
+        id="login-modal-card"
+        className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden my-auto max-h-[calc(100vh-2rem)] flex flex-col"
+      >
+        {/* Header with AquaAds Brand styling */}
+        <div className="p-6 sm:p-7 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 text-white relative shrink-0">
           <button
+            id="login-modal-close-btn"
             onClick={onClose}
-            className="absolute top-5 right-5 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-            aria-label="Close"
+            className="absolute top-5 right-5 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 active:bg-white/30 text-white transition-colors flex items-center justify-center cursor-pointer"
+            aria-label="Close dialog"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
-          <div className="flex items-center gap-2 mb-2">
-            <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white font-mono text-[11px] font-bold tracking-wide uppercase">
-              Zero Database Required
+
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center text-white">
+              <Droplets className="w-4 h-4" />
+            </div>
+            <span className="text-xs font-bold tracking-wider text-blue-100 uppercase">
+              AquaAds Platform
             </span>
           </div>
-          <h2 className="text-2xl font-black tracking-tight">Sign In to AquaAds</h2>
-          <p className="text-blue-100 text-sm mt-1">
-            Access your campaigns, analytics, and admin dashboard instantly.
+
+          <h2 className="text-2xl font-black tracking-tight text-white">
+            {activeTab === 'login' ? 'Sign In to AquaAds' : 'Create an Account'}
+          </h2>
+          <p className="text-blue-100/90 text-xs sm:text-sm mt-1 font-normal leading-relaxed">
+            {activeTab === 'login'
+              ? 'Access your sustainable water bottle campaigns and live distribution stats.'
+              : 'Start advertising on eco-friendly paper water bottles in minutes.'}
           </p>
         </div>
 
-        {/* Tab Selection */}
-        <div className="flex border-b border-slate-100 bg-slate-50/70 p-1.5 gap-1.5">
-          <button
-            type="button"
-            onClick={() => setActiveTab('quick')}
-            className={`flex-1 py-2.5 px-3 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'quick'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>1-Click Sign In</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('custom')}
-            className={`flex-1 py-2.5 px-3 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'custom'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>Custom Email</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('google')}
-            className={`flex-1 py-2.5 px-3 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'google'
-                ? 'bg-white text-blue-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
-              <path
-                fill="currentColor"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="currentColor"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="currentColor"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-              />
-              <path
-                fill="currentColor"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-              />
-            </svg>
-            <span>Google Auth</span>
-          </button>
+        {/* 2-Option Segmented Tab Switcher */}
+        <div className="px-6 pt-4 pb-2 bg-slate-50/90 border-b border-slate-100 shrink-0">
+          <div className="grid grid-cols-2 p-1 bg-slate-200/70 rounded-2xl gap-1">
+            <button
+              id="tab-login-btn"
+              type="button"
+              onClick={() => {
+                setActiveTab('login');
+                setFormError(null);
+              }}
+              className={`py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                activeTab === 'login'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Log In</span>
+            </button>
+            <button
+              id="tab-signup-btn"
+              type="button"
+              onClick={() => {
+                setActiveTab('signup');
+                setFormError(null);
+              }}
+              className={`py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                activeTab === 'signup'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Sign Up</span>
+            </button>
+          </div>
         </div>
 
-        {/* Modal Body */}
-        <div className="p-6">
-          {activeTab === 'quick' && (
-            <div className="space-y-3">
-              <p className="text-xs text-slate-500 font-medium mb-1">
-                Select an account to log in immediately without passwords or database connection:
-              </p>
-
-              {/* Admin 1 Button */}
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('jmisagor079@gmail.com', 'AquaAds Head Office')}
-                className="w-full p-4 rounded-2xl border border-blue-100 bg-blue-50/60 hover:bg-blue-100/70 transition-all flex items-center justify-between group cursor-pointer text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs">
-                    <Shield className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 text-sm">Jmi Sagor</span>
-                      <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
-                        Admin 1
-                      </span>
-                    </div>
-                    <p className="text-xs font-mono text-slate-500 mt-0.5">jmisagor079@gmail.com</p>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-blue-600 group-hover:translate-x-1 transition-transform" />
-              </button>
-
-              {/* Admin 2 Button */}
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('tonmoyletar@gmail.com', 'AquaAds Operations')}
-                className="w-full p-4 rounded-2xl border border-purple-100 bg-purple-50/60 hover:bg-purple-100/70 transition-all flex items-center justify-between group cursor-pointer text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold shadow-xs">
-                    <Shield className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 text-sm">Tonmoy Letar</span>
-                      <span className="px-2 py-0.5 rounded-full bg-purple-600 text-white text-[10px] font-bold">
-                        Admin 2
-                      </span>
-                    </div>
-                    <p className="text-xs font-mono text-slate-500 mt-0.5">tonmoyletar@gmail.com</p>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-purple-600 group-hover:translate-x-1 transition-transform" />
-              </button>
-
-              {/* Advertiser Demo Button */}
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('demo@business.com', 'PureTech Hydration')}
-                className="w-full p-4 rounded-2xl border border-emerald-100 bg-emerald-50/60 hover:bg-emerald-100/70 transition-all flex items-center justify-between group cursor-pointer text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
-                    <Building2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 text-sm">Demo Advertiser</span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
-                        Client
-                      </span>
-                    </div>
-                    <p className="text-xs font-mono text-slate-500 mt-0.5">demo@business.com (PureTech)</p>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-emerald-600 group-hover:translate-x-1 transition-transform" />
-              </button>
+        {/* Modal Scrollable Body */}
+        <div className="p-6 sm:p-7 overflow-y-auto space-y-4">
+          {formError && (
+            <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-2xl font-medium flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+              <span>{formError}</span>
             </div>
           )}
 
-          {activeTab === 'custom' && (
-            <form onSubmit={handleCustomSubmit} className="space-y-4">
+          {/* TAB 1: LOGIN */}
+          {activeTab === 'login' && (
+            <form id="login-form" onSubmit={handleLoginSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Your Email Address *
+                  Email Address
                 </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. contact@yourbrand.com"
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Tip: Entering an admin email grants immediate admin control.
-                </p>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="login-email-input"
+                    type="email"
+                    required
+                    autoFocus
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Company or Brand Name (Optional)
+                  Password
                 </label>
-                <input
-                  type="text"
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="e.g. Acme Beverages Inc."
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                />
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="login-password-input"
+                    type={showLoginPassword ? 'text' : 'password'}
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPassword(!showLoginPassword)}
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-0.5">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-600 font-medium">Keep me signed in</span>
+                </label>
+                <span className="text-[11px] text-slate-400 font-medium">
+                  Instant sign-in
+                </span>
               </div>
 
               <button
+                id="login-submit-btn"
                 type="submit"
-                className="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-2xl shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
+                className="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold text-sm rounded-2xl shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
               >
-                <span>Sign In Without Database</span>
+                <span>Sign In to Dashboard</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              {/* Toggle to Signup */}
+              <div className="text-center pt-2">
+                <span className="text-xs text-slate-500">Need a new account? </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('signup');
+                    setFormError(null);
+                  }}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                >
+                  Create one here
+                </button>
+              </div>
             </form>
           )}
 
-          {activeTab === 'google' && (
-            <div className="space-y-4 text-center">
-              <p className="text-sm text-slate-600 leading-relaxed">
-                You can also authenticate using your Google account via Firebase OAuth:
-              </p>
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={isLoggingIn}
-                className="w-full py-3.5 px-6 bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm rounded-2xl border border-slate-200 shadow-xs transition-all flex items-center justify-center gap-3 cursor-pointer"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+          {/* TAB 2: SIGNUP */}
+          {activeTab === 'signup' && (
+            <form id="signup-form" onSubmit={handleSignupSubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <User className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="signup-name-input"
+                    type="text"
+                    autoFocus
+                    value={signupName}
+                    onChange={(e) => setSignupName(e.target.value)}
+                    placeholder="e.g. Sarah Connor"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all"
                   />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Company / Brand Name
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="signup-company-input"
+                    type="text"
+                    value={signupCompany}
+                    onChange={(e) => setSignupCompany(e.target.value)}
+                    placeholder="e.g. EcoDrink Beverages"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all"
                   />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Work Email <span className="text-blue-600">*</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="signup-email-input"
+                    type="email"
+                    required
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    placeholder="sarah@ecodrink.com"
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all"
                   />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Create Password <span className="text-blue-600">*</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="signup-password-input"
+                    type={showSignupPassword ? 'text' : 'password'}
+                    required
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
+                    placeholder="At least 4 characters"
+                    className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all"
                   />
-                </svg>
-                <span>{isLoggingIn ? 'Connecting...' : 'Sign in with Google'}</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSignupPassword(!showSignupPassword)}
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    aria-label={showSignupPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showSignupPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100 flex items-center gap-2 text-blue-700 text-xs font-medium">
+                <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Instant access — zero database config required</span>
+              </div>
 
               <button
-                type="button"
-                onClick={loginWithRedirect}
-                disabled={isLoggingIn}
-                className="text-xs text-slate-500 hover:text-blue-600 underline underline-offset-4 cursor-pointer"
+                id="signup-submit-btn"
+                type="submit"
+                className="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold text-sm rounded-2xl shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 cursor-pointer mt-2"
               >
-                Use Full-Page Google Redirect (Mobile)
+                <span>Complete Registration</span>
+                <ArrowRight className="w-4 h-4" />
               </button>
-            </div>
+
+              {/* Toggle to Login */}
+              <div className="text-center pt-2">
+                <span className="text-xs text-slate-500">Already have an account? </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('login');
+                    setFormError(null);
+                  }}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                >
+                  Log in here
+                </button>
+              </div>
+            </form>
           )}
-
-          {/* Footer note */}
-          <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <div className="flex items-center gap-1.5 text-emerald-600 font-semibold">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Offline-ready & Vercel compatible</span>
-            </div>
-            <span>Session saved locally</span>
-          </div>
         </div>
       </div>
     </div>

@@ -1,72 +1,132 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../AuthContext';
-import { db, collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc } from '../firebase';
+import { db, auth, collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc } from '../firebase';
 import { ChatMessage, UserProfile, Campaign } from '../types';
 import { handleFirestoreError, OperationType } from '../firebase';
 import { syncMessageToSupabase } from '../lib/supabase';
+import { getLocalMessages, saveLocalMessage, getLocalUsers, getLocalCampaigns } from '../lib/localData';
 import { Send, Search, CheckCheck, MessageSquare, Package, ShieldCheck, User, Sparkles, RefreshCw, Filter, ExternalLink, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
 export const AdminMessaging: React.FC = () => {
   const { user: currentAdmin } = useAuth();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => getLocalMessages());
+  const [users, setUsers] = useState<UserProfile[]>(() => getLocalUsers());
+  const [campaigns, setCampaigns] = useState<Campaign[]>(() => getLocalCampaigns());
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterUnread, setFilterUnread] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch all users for metadata
+  // Synchronize with local storage updates
   useEffect(() => {
-    const q = query(collection(db, 'users'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const uList = snapshot.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile));
-        setUsers(uList);
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'users')
-    );
-    return () => unsubscribe();
+    const handleLocalMessages = () => {
+      setMessages(prev => {
+        const local = getLocalMessages();
+        const mergedMap = new Map<string, ChatMessage>();
+        local.forEach(m => mergedMap.set(m.id, m));
+        prev.forEach(m => {
+          if (!mergedMap.has(m.id)) mergedMap.set(m.id, m);
+        });
+        return Array.from(mergedMap.values());
+      });
+    };
+
+    const handleLocalCampaigns = () => {
+      setCampaigns(prev => {
+        const local = getLocalCampaigns();
+        const mergedMap = new Map<string, Campaign>();
+        local.forEach(c => mergedMap.set(c.id, c));
+        prev.forEach(c => {
+          if (!mergedMap.has(c.id)) mergedMap.set(c.id, c);
+        });
+        return Array.from(mergedMap.values());
+      });
+    };
+
+    window.addEventListener('aquaads_messages_updated', handleLocalMessages);
+    window.addEventListener('aquaads_campaigns_updated', handleLocalCampaigns);
+
+    return () => {
+      window.removeEventListener('aquaads_messages_updated', handleLocalMessages);
+      window.removeEventListener('aquaads_campaigns_updated', handleLocalCampaigns);
+    };
   }, []);
 
-  // Fetch all campaigns for reference
+  // Safe real-time Firestore listeners (only if authenticated user is present in Firebase Auth)
   useEffect(() => {
-    const q = query(collection(db, 'campaigns'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const cList = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Campaign));
-        setCampaigns(cList);
-      },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'campaigns')
-    );
-    return () => unsubscribe();
-  }, []);
+    if (!auth.currentUser) return;
 
-  // Subscribe to all messages in real time
-  useEffect(() => {
-    setLoading(true);
-    const q = query(collection(db, 'messages'), orderBy('createdAt', 'asc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const allMsgs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as ChatMessage));
-        setMessages(allMsgs);
-        setLoading(false);
-      },
-      (err) => {
-        setLoading(false);
-        handleFirestoreError(err, OperationType.LIST, 'messages');
-      }
-    );
-    return () => unsubscribe();
-  }, []);
+    let unsubUsers = () => {};
+    let unsubCampaigns = () => {};
+    let unsubMessages = () => {};
+
+    try {
+      // 1. Users
+      const qUsers = query(collection(db, 'users'));
+      unsubUsers = onSnapshot(
+        qUsers,
+        (snapshot) => {
+          const uList = snapshot.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile));
+          setUsers(prev => {
+            const mergedMap = new Map<string, UserProfile>();
+            prev.forEach(u => mergedMap.set(u.uid, u));
+            uList.forEach(u => mergedMap.set(u.uid, u));
+            return Array.from(mergedMap.values());
+          });
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'users')
+      );
+
+      // 2. Campaigns
+      const qCamp = query(collection(db, 'campaigns'), orderBy('createdAt', 'desc'));
+      unsubCampaigns = onSnapshot(
+        qCamp,
+        (snapshot) => {
+          const cList = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Campaign));
+          setCampaigns(prev => {
+            const mergedMap = new Map<string, Campaign>();
+            prev.forEach(c => mergedMap.set(c.id, c));
+            cList.forEach(c => mergedMap.set(c.id, c));
+            return Array.from(mergedMap.values());
+          });
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'campaigns')
+      );
+
+      // 3. Messages
+      const qMsg = query(collection(db, 'messages'), orderBy('createdAt', 'asc'));
+      unsubMessages = onSnapshot(
+        qMsg,
+        (snapshot) => {
+          const mList = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as ChatMessage));
+          setMessages(prev => {
+            const mergedMap = new Map<string, ChatMessage>();
+            prev.forEach(m => mergedMap.set(m.id, m));
+            mList.forEach(m => mergedMap.set(m.id, m));
+            return Array.from(mergedMap.values());
+          });
+          setLoading(false);
+        },
+        (err) => {
+          setLoading(false);
+          handleFirestoreError(err, OperationType.LIST, 'messages');
+        }
+      );
+    } catch {
+      // If Firestore connection cannot be initialized
+    }
+
+    return () => {
+      unsubUsers();
+      unsubCampaigns();
+      unsubMessages();
+    };
+  }, [currentAdmin]);
 
   // Build list of unique conversations
   interface ConversationSummary {
@@ -148,8 +208,19 @@ export const AdminMessaging: React.FC = () => {
     }
   }, [filteredConversations, selectedUserId]);
 
-  // Messages for currently selected conversation
-  const selectedMessages = messages.filter((m) => m.conversationId === selectedUserId);
+  // Messages for currently selected conversation (strictly deduplicated by ID)
+  const selectedMessages = React.useMemo(() => {
+    if (!selectedUserId) return [];
+    const seen = new Set<string>();
+    const list: ChatMessage[] = [];
+    for (const m of messages) {
+      if (m.conversationId === selectedUserId && m.id && !seen.has(m.id)) {
+        seen.add(m.id);
+        list.push(m);
+      }
+    }
+    return list;
+  }, [messages, selectedUserId]);
   const selectedUser = users.find((u) => u.uid === selectedUserId);
   const selectedUserCampaigns = campaigns.filter((c) => c.userId === selectedUserId);
 
@@ -157,9 +228,20 @@ export const AdminMessaging: React.FC = () => {
   useEffect(() => {
     if (!selectedUserId) return;
     const unreadMsgs = selectedMessages.filter((m) => m.senderRole === 'user' && !m.read);
-    unreadMsgs.forEach((m) => {
-      updateDoc(doc(db, 'messages', m.id), { read: true }).catch(() => {});
-    });
+    if (unreadMsgs.length === 0) return;
+
+    // Update locally
+    const currentAll = getLocalMessages();
+    const updated = currentAll.map(m => (m.conversationId === selectedUserId && m.senderRole === 'user') ? { ...m, read: true } : m);
+    try {
+      localStorage.setItem('aquaads_local_messages', JSON.stringify(updated));
+    } catch {}
+
+    if (auth.currentUser) {
+      unreadMsgs.forEach((m) => {
+        updateDoc(doc(db, 'messages', m.id), { read: true }).catch(() => {});
+      });
+    }
   }, [selectedUserId, selectedMessages]);
 
   useEffect(() => {
@@ -171,44 +253,54 @@ export const AdminMessaging: React.FC = () => {
     if (!currentAdmin || !selectedUserId || !replyText.trim() || sending) return;
 
     setSending(true);
-    try {
-      const recipientEmail = selectedUser?.email || conversationsMap[selectedUserId]?.userEmail || '';
+    const recipientEmail = selectedUser?.email || conversationsMap[selectedUserId]?.userEmail || '';
+    const nowIso = new Date().toISOString();
+    const tempId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
 
-      const messagePayload: Omit<ChatMessage, 'id'> = {
-        senderId: currentAdmin.uid,
-        senderEmail: currentAdmin.email,
-        senderRole: 'admin',
-        senderName: 'AquaAds Operations Desk',
-        recipientId: selectedUserId,
-        recipientEmail,
-        conversationId: selectedUserId,
-        message: replyText.trim(),
-        createdAt: new Date().toISOString(),
-        read: false,
-      };
+    const fullMessage: ChatMessage = {
+      id: tempId,
+      senderId: currentAdmin.uid,
+      senderEmail: currentAdmin.email,
+      senderRole: 'admin',
+      senderName: 'AquaAds Operations Desk',
+      recipientId: selectedUserId,
+      recipientEmail,
+      conversationId: selectedUserId,
+      message: replyText.trim(),
+      createdAt: nowIso,
+      read: false,
+    };
 
-      const cleanData = Object.fromEntries(
-        Object.entries(messagePayload).filter(([_, v]) => v !== undefined)
-      );
+    // Save locally immediately (dispatches aquaads_messages_updated to sync state)
+    saveLocalMessage(fullMessage);
+    setMessages(prev => {
+      if (prev.some(m => m.id === fullMessage.id)) return prev;
+      return [...prev, fullMessage];
+    });
+    setReplyText('');
 
-      const docRef = await addDoc(collection(db, 'messages'), cleanData);
-      syncMessageToSupabase({
-        id: docRef.id,
-        conversationId: selectedUserId,
-        senderId: currentAdmin.uid,
-        senderEmail: currentAdmin.email,
-        senderRole: 'admin',
-        text: replyText.trim(),
-        read: false,
-        createdAt: messagePayload.createdAt,
-      });
+    syncMessageToSupabase({
+      id: tempId,
+      conversationId: selectedUserId,
+      senderId: currentAdmin.uid,
+      senderEmail: currentAdmin.email,
+      senderRole: 'admin',
+      text: fullMessage.message,
+      read: false,
+      createdAt: fullMessage.createdAt,
+    });
 
-      setReplyText('');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'messages');
-    } finally {
-      setSending(false);
+    if (auth.currentUser) {
+      try {
+        const cleanData = Object.fromEntries(
+          Object.entries(fullMessage).filter(([k, v]) => k !== 'id' && v !== undefined)
+        );
+        await addDoc(collection(db, 'messages'), cleanData);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'messages');
+      }
     }
+    setSending(false);
   };
 
   const quickReplies = [

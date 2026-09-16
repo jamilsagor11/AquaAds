@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, collection, query, orderBy, onSnapshot, updateDoc, doc, deleteDoc } from '../firebase';
+import { db, auth, collection, query, orderBy, onSnapshot, updateDoc, doc, deleteDoc } from '../firebase';
 import { Campaign, UserProfile } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { CheckCircle2, XCircle, Clock, Users, BarChart3, Package, Eye, Calendar, Target, ExternalLink, ArrowRight, MessageSquare, Trash2, ShieldCheck, Database, RefreshCw, Copy, Check, Server, AlertCircle } from 'lucide-react';
@@ -104,38 +104,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onNavigate }) => {
   };
 
   useEffect(() => {
-    if (!isAuthorized) return;
+    if (!isAuthorized || !auth.currentUser) return;
 
-    const qCampaigns = query(collection(db, 'campaigns'), orderBy('createdAt', 'desc'));
-    const qUsers = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+    let unsubCampaigns = () => {};
+    let unsubUsers = () => {};
 
-    const unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
-      const local = getLocalCampaigns();
-      const mergedMap = new Map<string, Campaign>();
-      data.forEach(c => mergedMap.set(c.id, c));
-      local.forEach(c => {
-        if (!mergedMap.has(c.id)) mergedMap.set(c.id, c);
+    try {
+      const qCampaigns = query(collection(db, 'campaigns'), orderBy('createdAt', 'desc'));
+      const qUsers = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+
+      unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
+        const local = getLocalCampaigns();
+        const mergedMap = new Map<string, Campaign>();
+        data.forEach(c => mergedMap.set(c.id, c));
+        local.forEach(c => {
+          if (!mergedMap.has(c.id)) mergedMap.set(c.id, c);
+        });
+        setCampaigns(Array.from(mergedMap.values()));
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'campaigns');
+        setLoading(false);
       });
-      setCampaigns(Array.from(mergedMap.values()));
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'campaigns');
-      setLoading(false);
-    });
 
-    const unsubUsers = onSnapshot(qUsers, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
-      const localUsers = getLocalUsers();
-      const mergedMap = new Map<string, UserProfile>();
-      data.forEach(u => mergedMap.set(u.uid, u));
-      localUsers.forEach(u => {
-        if (!mergedMap.has(u.uid)) mergedMap.set(u.uid, u);
+      unsubUsers = onSnapshot(qUsers, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
+        const localUsers = getLocalUsers();
+        const mergedMap = new Map<string, UserProfile>();
+        data.forEach(u => mergedMap.set(u.uid, u));
+        localUsers.forEach(u => {
+          if (!mergedMap.has(u.uid)) mergedMap.set(u.uid, u);
+        });
+        setUsers(Array.from(mergedMap.values()));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'users');
       });
-      setUsers(Array.from(mergedMap.values()));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'users');
-    });
+    } catch {}
 
     return () => {
       unsubCampaigns();

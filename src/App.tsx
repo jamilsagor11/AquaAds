@@ -17,29 +17,23 @@ import { motion } from 'motion/react';
 
 
 const LandingPage: React.FC = () => {
-  const { login, loginWithRedirect, isLoggingIn } = useAuth();
+  const { login } = useAuth();
 
   return (
     <div className="min-h-screen bg-white overflow-hidden">
       {/* Hero Section */}
-      <nav className="max-w-7xl mx-auto px-6 py-8 flex justify-between items-center">
+      <nav className="max-w-7xl mx-auto px-6 py-6 flex justify-between items-center">
         <div className="flex items-center gap-2 text-blue-600">
           <Droplets className="w-8 h-8" />
           <span className="text-2xl font-black tracking-tight">AquaAds</span>
         </div>
         <button
-          onClick={login}
-          disabled={isLoggingIn}
-          className="px-6 py-2.5 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 disabled:opacity-70 flex items-center gap-2 cursor-pointer"
+          id="nav-get-started-btn"
+          onClick={() => login('login')}
+          className="px-6 py-2.5 bg-blue-600 text-white rounded-full font-bold text-sm hover:bg-blue-700 transition-all shadow-md shadow-blue-200 flex items-center gap-2 cursor-pointer group"
         >
-          {isLoggingIn ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Connecting...</span>
-            </>
-          ) : (
-            'Get Started'
-          )}
+          <span>Get Started</span>
+          <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
         </button>
       </nav>
 
@@ -58,18 +52,19 @@ const LandingPage: React.FC = () => {
           </p>
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <button
-              onClick={login}
+              id="hero-signup-btn"
+              onClick={() => login('signup')}
               className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold text-lg hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex items-center gap-2 group cursor-pointer"
             >
               <span>Launch Your Campaign</span>
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
             <button
-              onClick={login}
-              className="text-xs font-semibold text-slate-600 hover:text-blue-600 transition-colors py-2 px-3 rounded-xl bg-slate-100/80 hover:bg-blue-50 border border-slate-200/60 cursor-pointer flex items-center gap-1.5"
+              id="hero-login-btn"
+              onClick={() => login('login')}
+              className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-base transition-colors cursor-pointer flex items-center gap-2"
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Login without database (1-Click)</span>
+              <span>Sign In to AquaAds</span>
             </button>
           </div>
           

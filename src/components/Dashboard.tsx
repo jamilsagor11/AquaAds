@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../AuthContext';
-import { db, collection, query, where, orderBy, onSnapshot } from '../firebase';
+import { db, auth, collection, query, where, orderBy, onSnapshot } from '../firebase';
 import { Campaign } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { Clock, CheckCircle2, XCircle, TrendingUp, Wallet, Package, Eye, Calendar, Target, ExternalLink, ArrowRight, MessageSquare } from 'lucide-react';
@@ -41,34 +41,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
     window.addEventListener('aquaads_campaigns_updated', loadLocal);
 
-    // Also attempt real-time Firestore sync
+    // Also attempt real-time Firestore sync if authenticated
     let unsubCampaigns = () => {};
-    try {
-      const qCampaigns = query(
-        collection(db, 'campaigns'),
-        where('userId', '==', user.uid),
-        orderBy('createdAt', 'desc')
-      );
+    if (auth.currentUser) {
+      try {
+        const qCampaigns = query(
+          collection(db, 'campaigns'),
+          where('userId', '==', user.uid),
+          orderBy('createdAt', 'desc')
+        );
 
-      unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
-        const firestoreData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
-        const allLocal = getLocalCampaigns().filter(c => c.userId === user.uid || c.userId === 'demo_user_1');
-        
-        // Merge without duplicates
-        const mergedMap = new Map<string, Campaign>();
-        firestoreData.forEach(c => mergedMap.set(c.id, c));
-        allLocal.forEach(c => {
-          if (!mergedMap.has(c.id)) mergedMap.set(c.id, c);
+        unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
+          const firestoreData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Campaign));
+          const allLocal = getLocalCampaigns().filter(c => c.userId === user.uid || c.userId === 'demo_user_1');
+          
+          // Merge without duplicates
+          const mergedMap = new Map<string, Campaign>();
+          firestoreData.forEach(c => mergedMap.set(c.id, c));
+          allLocal.forEach(c => {
+            if (!mergedMap.has(c.id)) mergedMap.set(c.id, c);
+          });
+          
+          setCampaigns(Array.from(mergedMap.values()));
+          setLoading(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'campaigns');
+          setLoading(false);
         });
-        
-        setCampaigns(Array.from(mergedMap.values()));
+      } catch {
         setLoading(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'campaigns');
-        setLoading(false);
-      });
-    } catch {
-      setLoading(false);
+      }
     }
 
     return () => {

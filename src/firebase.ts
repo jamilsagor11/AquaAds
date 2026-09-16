@@ -8,7 +8,7 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { initializeFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, addDoc, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, addDoc, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import rawFirebaseConfig from '../firebase-applet-config.json';
 import { OperationType } from './types';
 
@@ -25,9 +25,7 @@ export const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {
-  experimentalAutoDetectLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
