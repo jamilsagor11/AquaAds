@@ -148,7 +148,7 @@ const LandingPage: React.FC = () => {
           <div className="flex flex-col items-center md:items-end gap-2">
             <p className="text-slate-500 text-sm">© 2026 AquaAds. All rights reserved.</p>
             <div className="text-[10px] text-slate-300 font-medium tracking-wider uppercase">
-              ( Made by Jamil 01307541441 )
+              (Made by TMJ 01307541441 )
             </div>
           </div>
         </div>

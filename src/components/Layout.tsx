@@ -250,7 +250,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                   <span>Sign Out of AquaAds</span>
                 </button>
                 <p className="text-[10px] text-center text-slate-400 mt-4">
-                  ( Made by Jamil 01307541441 )
+                  (Made by TMJ 01307541441 )
                 </p>
               </div>
             </motion.div>
@@ -351,7 +351,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                 Live Messaging Desk
               </button>
               <div className="text-[10px] text-slate-300 font-medium">
-                ( Made by Jamil 01307541441 )
+                (Made by TMJ 01307541441 )
               </div>
             </div>
           </div>
