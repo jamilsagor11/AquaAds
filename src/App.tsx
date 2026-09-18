@@ -5,14 +5,14 @@
 
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
-import { Layout } from './components/Layout';
+//import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { CampaignForm } from './components/CampaignForm';
-import { AdminPanel } from './components/AdminPanel';
+//import { AdminPanel } from './components/AdminPanel';
 import { UserMessaging } from './components/UserMessaging';
 import { AdminMessaging } from './components/AdminMessaging';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Droplets, ArrowRight, ShieldCheck, BarChart3, Globe } from 'lucide-react';
+//import { Droplets, ArrowRight, ShieldCheck, BarChart3, Globe } from 'lucide-react';
 import { motion } from 'motion/react';
 
 
